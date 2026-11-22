@@ -1,0 +1,39 @@
+{
+  "name": "rossengine3d",
+  "version": "0.1.0",
+  "description": "Browser 3D engine scripted in Luau, with editor and Electron runtime",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:player": "node tools/build-player.mjs",
+    "typecheck": "tsc --noEmit -p .",
+    "player": "electron electron/dev-main.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@luau-rs/luau": "^0.739.0",
+    "@monaco-editor/react": "^4.7.0",
+    "fflate": "^0.8.3",
+    "monaco-editor": "^0.57.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "private": true
+}
