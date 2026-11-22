@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import * as THREE from 'three'
 import { FileAudio, Image as ImageIcon, Pause, Play, Plus, Search, Shapes, Trash2, Upload, Copy } from 'lucide-react'
 import { Asset, AssetKind, assets, contentRef } from '../../engine/assets'
-import { loadMesh } from '../../engine/render/meshes'
+import { cloneMesh, loadMesh } from '../../engine/render/meshes'
 import { editor, useEditor } from '../store'
 import { formatBytes, importFiles, insertAsset, pickFiles, usagesOf } from '../assetOps'
 
@@ -151,7 +151,7 @@ function renderThumb(asset: Asset): Promise<string | null> {
     const sun = new THREE.DirectionalLight(0xffffff, 2)
     sun.position.set(2, 3, 2)
     scene.add(sun)
-    const obj = m.object.clone(true)
+    const obj = cloneMesh(m)
     // undo normalization so the preview keeps the model's proportions
     const s = m.naturalSize
     const max = Math.max(s.x, s.y, s.z) || 1

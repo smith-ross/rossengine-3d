@@ -4,7 +4,8 @@ import { CFrame, Color3, EnumItem, Vector3 } from '../datatypes'
 import { Instance } from '../instance'
 import { BasePart, DataModel } from '../classes'
 import { materialTexture } from './textures'
-import { loadMesh, loadTexture } from './meshes'
+import { cloneMesh, loadMesh, loadTexture } from './meshes'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { assets } from '../assets'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
@@ -101,6 +102,12 @@ export class SceneRenderer {
 
     this.sky = makeSky()
     this.scene.add(this.sky)
+
+    // image-based lighting, so PBR/metallic materials from imported models aren't black
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this.scene.environmentIntensity = 0.45
+    pmrem.dispose()
 
     this.hoverBox = new THREE.Box3Helper(new THREE.Box3(), new THREE.Color(0x9fd0ff))
     ;(this.hoverBox.material as THREE.LineBasicMaterial).depthTest = false
@@ -313,7 +320,7 @@ export class SceneRenderer {
       if (!meshId) return
       void loadMesh(meshId).then((m) => {
         if (!m || v.loadedKey !== meshId || !this.views.has(part)) return
-        const clone = m.object.clone(true)
+        const clone = cloneMesh(m)
         clone.traverse((o) => { o.userData.instance = part; const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true } })
         v.loaded = clone
         v.ownMaterials = m.hasTextures
