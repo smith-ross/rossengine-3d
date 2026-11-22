@@ -1,8 +1,9 @@
 // Editing operations on the edit DataModel (all undoable).
-import { CFrame, Color3, Vector3, enumItem } from '../engine/datatypes'
+import { CFrame, Color3, Vector2, Vector3, enumItem } from '../engine/datatypes'
 import { Instance, SerializedInstance, createInstance, deserialize, getClass, serialize } from '../engine/instance'
 import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
+import { view2d } from './components/Viewport2D'
 import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
@@ -28,10 +29,18 @@ export function defaultParentFor(className: string): Instance {
   const g = editor.game
   const sel = editor.selection[0]
   const info = getClass(className)
+  if (info && isA(info.name, 'Node2D')) {
+    return sel && isA(sel.className, 'Node2D') && !(sel.className === 'TileMap') ? sel : g.getService('World2D')
+  }
   if (sel && !(sel instanceof BasePart && info && (isA(info.name, 'BasePart')))) {
     // insert into the selected container
     return sel
   }
+  if (info && isA(info.name, 'Node2D')) {
+    // inside the selected 2D node, otherwise at the top of the 2D world
+    return sel && isA(sel.className, 'Node2D') ? sel : g.getService('World2D')
+  }
+  if (className === 'SpriteAnimation') return sel?.className === 'AnimatedSprite2D' ? sel : (sel?.parent?.className === 'AnimatedSprite2D' ? sel.parent : g.getService('World2D'))
   if (className === 'Script') return g.getService('ScriptService')
   if (className === 'ModuleScript') return g.getService('Storage')
   if (className === 'ScreenGui') return g.getService('StarterGui')
@@ -53,6 +62,11 @@ export function insertObject(className: string, parent?: Instance): Instance {
       if (className === 'SpawnLocation') { inst.set('Size', new Vector3(12, 1, 12)) }
     }
     if (className === 'Part' || className === 'WedgePart') inst.set('Color', Color3.fromRGB(163, 162, 165))
+    if (isA(className, 'Node2D') && !(parent ?? defaultParentFor(className)).isA('Node2D')) {
+      // drop new 2D objects at the centre of the 2D view
+      inst.set('Position', new Vector2(Math.round(view2d.x), Math.round(view2d.y)))
+    }
+    if (className === 'Camera2D') editor.game.getService('World2D').set('CurrentCamera', inst)
     if (className === 'Frame' || className === 'TextLabel' || className === 'TextButton' || className === 'TextBox' || className === 'ImageLabel') {
       const p = parent ?? defaultParentFor(className)
       if (!(p.className === 'ScreenGui' || p.isA('GuiObject'))) {

@@ -7,9 +7,9 @@ import { Instance, defineClass, isA } from './instance'
 export interface Runtime2D {
   moveAndSlide(body: Instance): Vector2
   bodyState(body: Instance): { floor: boolean; wall: boolean; ceiling: boolean; floorNormal: Vector2 }
-  applyImpulse(body: Instance, impulse: Vector2): void
-  screenToWorld(p: Vector2): Vector2
-  worldToScreen(p: Vector2): Vector2
+  applyImpulse2D(body: Instance, impulse: Vector2): void
+  screenToWorld2D(p: Vector2): Vector2
+  worldToScreen2D(p: Vector2): Vector2
   raycast2D(origin: Vector2, direction: Vector2, exclude: Instance[]): Map<string, unknown> | null
 }
 
@@ -271,8 +271,8 @@ export function register2DClasses() {
       Offset: { type: 'Vector2', category: 'Camera' },
     },
     methods: {
-      ScreenToWorld: (self: Instance, p: Vector2) => rt2d(self).screenToWorld(p),
-      WorldToScreen: (self: Instance, p: Vector2) => rt2d(self).worldToScreen(p),
+      ScreenToWorld: (self: Instance, p: Vector2) => rt2d(self).screenToWorld2D(p),
+      WorldToScreen: (self: Instance, p: Vector2) => rt2d(self).worldToScreen2D(p),
     },
   })
   defineClass(Text2D, {
@@ -298,7 +298,7 @@ export function register2DClasses() {
       FixedRotation: { type: 'bool', category: 'Physics' },
       LinearDamping: { type: 'number', category: 'Physics' },
     },
-    methods: { ApplyImpulse: (self: Instance, v: Vector2) => rt2d(self).applyImpulse(self, v) },
+    methods: { ApplyImpulse: (self: Instance, v: Vector2) => rt2d(self).applyImpulse2D(self, v) },
   })
   defineClass(CharacterBody2D, {
     name: 'CharacterBody2D', superclass: 'PhysicsBody2D', category: '2D',

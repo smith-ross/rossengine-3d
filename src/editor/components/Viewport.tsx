@@ -12,6 +12,7 @@ import { insertHint, selectionPivot } from '../ops'
 import { assets } from '../../engine/assets'
 import { importFiles, insertAsset } from '../assetOps'
 import { ASSET_DRAG_TYPE } from './AssetsPanel'
+import { Viewport2D } from './Viewport2D'
 
 // camera state survives renderer rebuilds (undo, open file...)
 const cam = { pos: new THREE.Vector3(30, 25, 40), yaw: 0.65, pitch: -0.45 }
@@ -323,20 +324,22 @@ export function Viewport() {
     }
   }, [game])
 
-  // pause the edit renderer while playing
+  const is2D = !!game.getService('World2D').get('Enabled')
+  // pause the 3D edit renderer while playing or while editing a 2D place
   useEffect(() => {
     const r = rendererRef.current
     if (!r) return
-    if (ed.playing) r.stop()
+    if (ed.playing || is2D) r.stop()
     else r.start()
-  }, [ed.playing])
+  }, [ed.playing, is2D])
 
   return (
     <div className="viewport">
-      <div ref={editRef} className="viewport-layer" style={{ visibility: ed.playing ? 'hidden' : 'visible' }} />
+      <div ref={editRef} className="viewport-layer" style={{ visibility: ed.playing || is2D ? 'hidden' : 'visible' }} />
+      {is2D && !ed.playing && <div className="viewport-layer"><Viewport2D /></div>}
       <div ref={playRef} className="viewport-layer" style={{ visibility: ed.playing ? 'visible' : 'hidden' }} />
       {ed.starting && <div className="viewport-overlay">Starting…</div>}
-      {!ed.playing && (
+      {!ed.playing && !is2D && (
         <div className="viewport-hint">RMB look · WASD/QE fly · F focus · drag parts to move · Alt+click selects inside models · drop files to import</div>
       )}
     </div>

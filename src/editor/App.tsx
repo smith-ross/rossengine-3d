@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, FileCode2, FolderOpen, Globe, Languages, Package, Sparkles, Terminal, X } from 'lucide-react'
+import { Box, FileCode2, FolderOpen, Gamepad2, Globe, Languages, Package, Sparkles, Terminal, X } from 'lucide-react'
 import { editor, useEditor } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Explorer } from './components/Explorer'
@@ -69,6 +69,8 @@ export function App() {
       case 'new-baseplate': if (discardOk()) editor.newPlace('baseplate'); break
       case 'new-demo': if (discardOk()) editor.newPlace('demo'); break
       case 'new-languages': if (discardOk()) editor.newPlace('languages'); break
+      case 'new-platformer': if (discardOk()) editor.newPlace('platformer'); break
+      case 'new-2d': if (discardOk()) editor.newPlace('2d'); break
       case 'open': if (discardOk()) void openPlace(); break
       case 'save': void savePlace(); break
       case 'save-as': void savePlace(true); break
@@ -205,6 +207,7 @@ function StartScreen() {
           {hasContent && card(<Sparkles size={22} />, `Continue “${ed.placeName}”`, 'Pick up where you left off (autosaved in this browser).', () => { editor.showStart = false; editor.emit() })}
           {card(<Globe size={22} />, 'Baseplate', 'An empty world with a spawn point.', () => editor.newPlace('baseplate'))}
           {card(<FileCode2 size={22} />, 'Coin Collector', 'A small sample game with scripts, GUI, tweens and physics.', () => editor.newPlace('demo'))}
+          {card(<Gamepad2 size={22} />, '2D Platformer', 'Tilemap level, animated sprites, coins and a camera that follows you.', () => editor.newPlace('platformer'))}
           {card(<Languages size={22} />, 'Languages Demo', 'Luau, TypeScript and Python scripts that import each other.', () => editor.newPlace('languages'))}
           {card(<FolderOpen size={22} />, 'Open place…', 'Open a .rbe place file from disk.', () => void openPlace())}
         </div>

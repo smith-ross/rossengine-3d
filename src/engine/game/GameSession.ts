@@ -15,6 +15,10 @@ import { ScriptHost } from '../scripting/ScriptHost'
 import { TypeScriptRuntime } from '../scripting/TypeScriptRuntime'
 import { PythonRuntime } from '../scripting/PythonRuntime'
 import { languageOf } from '../scripting/languages'
+import { Renderer2D } from '../render/Renderer2D'
+import { Physics2D, initPhysics2D } from '../physics/Physics2D'
+import { Animator2D } from './Animator2D'
+import { Runtime2D, isNode2D, setWorldPosition, worldPosition } from '../classes2d'
 import { assets } from '../assets'
 
 export interface SessionOptions {
@@ -24,11 +28,16 @@ export interface SessionOptions {
   pythonIndexURL?: string
 }
 
-export class GameSession implements Runtime {
+export class GameSession implements Runtime, Runtime2D {
   readonly game: DataModel
   renderer!: SceneRenderer
   physics!: Physics
   luau!: LuauRuntime
+  /** 2D mode (World2D.Enabled): sprites/tilemaps instead of the 3D world and avatar */
+  mode2d = false
+  r2d: Renderer2D | null = null
+  phys2d: Physics2D | null = null
+  private animator = new Animator2D()
   scripts!: ScriptHost
   gui!: GuiRenderer
   private tweens = new TweenManager()
@@ -82,7 +91,16 @@ export class GameSession implements Runtime {
 
     this.renderer = new SceneRenderer(this.wrapper, game)
     this.physics = new Physics(game)
+    this.mode2d = !!game.getService('World2D').get('Enabled')
+    if (this.mode2d) {
+      await initPhysics2D()
+      this.renderer.renderer.domElement.style.display = 'none'
+      this.r2d = new Renderer2D(this.wrapper, game)
+      this.phys2d = new Physics2D(game)
+      ;(game as any).runtime2d = this
+    }
     this.gui = new GuiRenderer(this.wrapper)
+    this.gui.root.style.zIndex = '5'
     this.luau = await LuauRuntime.create(game, this.opts.output)
     // TypeScript and Python run on the shared JS scripting host (Python only loads if the place uses it)
     this.scripts = new ScriptHost(game, this.opts.output, this.luau)
@@ -119,8 +137,9 @@ export class GameSession implements Runtime {
     // 3. the local player joins
     this.addPlayer()
 
-    this.renderer.onBeforeRender = (dt) => this.frame(dt)
-    this.renderer.start()
+    const loop = this.r2d ?? this.renderer
+    loop.onBeforeRender = (dt) => this.frame(dt)
+    loop.start()
   }
 
   stop() {
@@ -134,6 +153,9 @@ export class GameSession implements Runtime {
     this.luau.destroy()
     this.renderer.dispose()
     this.physics.dispose()
+    this.r2d?.dispose()
+    this.phys2d?.dispose()
+    ;(this.game as any).runtime2d = null
     this.gui.dispose()
     this.wrapper.remove()
     this.game.runtime = null
@@ -197,7 +219,7 @@ export class GameSession implements Runtime {
     const playerGui = p.findFirstChild('PlayerGui')!
     for (const g of this.game.getService('StarterGui').children) g.clone().setParent(playerGui)
     this.gui.setSource(playerGui)
-    if (players.get('CharacterAutoLoads')) this.loadCharacter(p)
+    if (players.get('CharacterAutoLoads') && !this.mode2d) this.loadCharacter(p)
   }
 
   private scheduleRespawn() {
@@ -270,7 +292,14 @@ export class GameSession implements Runtime {
       if (!typing && this.keys.has('Space')) ctl.jump()
     }
 
-    this.physics.step(dt, (sdt) => { for (const c of this.controllers.values()) c.update(sdt) })
+    if (this.mode2d) {
+      this.phys2d!.step(dt)
+      this.animator.update(dt, this.r2d!.drawList.map((v) => v.inst),
+        (inst, frame) => { inst.set('Frame', frame); inst.fire('FrameChanged', frame) },
+        (inst, name) => { inst.set('Playing', false); inst.fire('AnimationFinished', name) })
+    } else {
+      this.physics.step(dt, (sdt) => { for (const c of this.controllers.values()) c.update(sdt) })
+    }
     this.checkDeaths()
     this.tweens.update(dt)
     // debris
@@ -283,6 +312,13 @@ export class GameSession implements Runtime {
     this.scripts.fireFrame(rs, 'PostSimulation', [dt])
     this.scripts.fireFrame(rs, 'Heartbeat', [dt])
 
+    if (this.mode2d) {
+      this.scripts.renderStep(dt)
+      this.scripts.fireFrame(rs, 'RenderStepped', [dt])
+      this.updateCamera2D(dt)
+      this.updateMouse2D()
+      return
+    }
     this.updateCamera(dt)
     this.scripts.renderStep(dt)
     this.scripts.fireFrame(rs, 'RenderStepped', [dt])
@@ -290,6 +326,53 @@ export class GameSession implements Runtime {
     if (cam) this.renderer.setCameraCFrame(cam.get<CFrame>('CFrame'), cam.get<number>('FieldOfView'))
     this.updateMouse()
   }
+
+  // ------------------------------------------------------------------ 2D
+  private camera2D(): Instance | null {
+    const w2d = this.game.getService('World2D')
+    const cur = w2d.get<Instance | null>('CurrentCamera')
+    if (cur && !cur.destroyed) return cur
+    return w2d.getDescendants().find((d) => d.className === 'Camera2D') ?? null
+  }
+
+  private updateCamera2D(dt: number) {
+    const r = this.r2d!
+    const cam = this.camera2D()
+    if (!cam) { r.view = { x: 0, y: 0, zoom: 1 }; return }
+    const follow = cam.get<Instance | null>('Follow')
+    if (follow && !follow.destroyed && isNode2D(follow)) {
+      const target = worldPosition(follow).add(cam.get<Vector2>('Offset'))
+      const cur = worldPosition(cam)
+      const sm = Math.min(0.99, Math.max(0, cam.get<number>('Smoothing') ?? 0))
+      const k = sm <= 0 ? 1 : 1 - Math.pow(sm, dt * 60)
+      setWorldPosition(cam, new Vector2(cur.x + (target.x - cur.x) * k, cur.y + (target.y - cur.y) * k))
+    }
+    const p = worldPosition(cam)
+    r.view = { x: p.x, y: p.y, zoom: Math.max(0.05, cam.get<number>('Zoom') ?? 1) }
+  }
+
+  private updateMouse2D() {
+    const m = this.mouseObj
+    if (!m) return
+    m.rawSet('X', this.mouse.x)
+    m.rawSet('Y', this.mouse.y)
+    const target = this.r2d!.pick(this.r2d!.viewportToWorld(this.mouse.x, this.mouse.y))
+    const cd = target ? clickDetectorFor(target) : null
+    if (cd !== this.hovered) {
+      this.hovered?.fire('MouseHoverLeave', this.player)
+      cd?.fire('MouseHoverEnter', this.player)
+      this.hovered = cd
+      this.r2d!.renderer.domElement.style.cursor = cd ? 'pointer' : 'default'
+    }
+  }
+
+  // Runtime2D
+  moveAndSlide(body: Instance) { return this.phys2d ? this.phys2d.moveAndSlide(body) : body.get<Vector2>('Velocity') }
+  bodyState(body: Instance) { return this.phys2d!.bodyState(body) }
+  applyImpulse2D(body: Instance, v: Vector2) { this.phys2d?.applyImpulse(body, v) }
+  screenToWorld2D(p: Vector2) { return this.r2d ? this.r2d.viewportToWorld(p.x, p.y) : p }
+  worldToScreen2D(p: Vector2) { return this.r2d ? this.r2d.worldToViewport(p) : p }
+  raycast2D(origin: Vector2, direction: Vector2, exclude: Instance[]) { return this.phys2d ? this.phys2d.raycast(origin, direction, exclude) : null }
 
   private deadSeen = new Set<Humanoid>()
   private checkDeaths() {
@@ -363,7 +446,7 @@ export class GameSession implements Runtime {
 
   // ------------------------------------------------------------------ input
   private bindInput() {
-    const el = this.renderer.renderer.domElement
+    const el = (this.r2d ?? this.renderer).renderer.domElement
     const uis = () => this.game.getService('UserInputService')
     const makeInput = (type: string, state: string, key = 'Unknown', pos = Vector3.zero, delta = Vector3.zero) => {
       const io = createInstance('InputObject')
@@ -461,7 +544,9 @@ export class GameSession implements Runtime {
   }
 
   private click(right: boolean) {
-    const target = this.mouseObj?.get<Instance | null>('Target')
+    const target = this.mode2d
+      ? this.r2d!.pick(this.r2d!.viewportToWorld(this.mouse.x, this.mouse.y))
+      : this.mouseObj?.get<Instance | null>('Target')
     if (!target) return
     const cd = clickDetectorFor(target)
     if (!cd) return
@@ -484,7 +569,7 @@ export class GameSession implements Runtime {
   }
   mouseLocation() { return this.mouse }
   viewportSize() {
-    const el = this.renderer?.renderer.domElement
+    const el = (this.r2d ?? this.renderer)?.renderer.domElement
     return new Vector2(el?.clientWidth ?? 0, el?.clientHeight ?? 0)
   }
   worldToScreen(p: Vector3): [Vector3, boolean] {

@@ -1,10 +1,10 @@
 import { ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
-  MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload,
+  MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload, Layers,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
 import { LANGUAGES, ScriptLanguage } from '../../engine/scripting/languages'
 import { ClassIcon } from './icons'
 import { openPlace, savePlace } from '../fileio'
@@ -74,6 +74,8 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('baseplate')}><span><FilePlus size={13} /> New Baseplate</span></div>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}><span><FilePlus size={13} /> New from Demo</span></div>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('languages')}><span><FilePlus size={13} /> New Languages Demo</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('2d')}><span><FilePlus size={13} /> New 2D Place</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('platformer')}><span><FilePlus size={13} /> New 2D Platformer</span></div>
               <div className="menu-sep" />
               <div className="menu-item" onClick={() => confirmDiscard() && openPlace()}><span><FolderOpen size={13} /> Open…</span><span className="menu-shortcut">Ctrl+O</span></div>
               <div className="menu-item" onClick={() => savePlace()}><span><Save size={13} /> Save</span><span className="menu-shortcut">Ctrl+S</span></div>
@@ -105,6 +107,24 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
               <div className="menu-item" onClick={() => insertPart('Cylinder')}><span><Cylinder size={13} /> Cylinder</span></div>
               <div className="menu-item" onClick={() => insertPart('Wedge')}><span><Triangle size={13} /> Wedge</span></div>
               <div className="menu-item" onClick={() => insertPart('Spawn')}><span><MapPin size={13} /> SpawnLocation</span></div>
+            </div>
+          )}
+        </Drop>
+        <Drop icon={<Layers size={18} />} label="2D" disabled={playing} wide>
+          {(close) => (
+            <div onClick={close}>
+              <div className="menu-cat">2D objects</div>
+              {[
+                ['Sprite2D', 'Sprite'], ['AnimatedSprite2D', 'Animated Sprite'], ['TileMap', 'Tile Map'], ['CharacterBody2D', 'Character Body'],
+                ['RigidBody2D', 'Rigid Body'], ['StaticBody2D', 'Static Body'], ['Area2D', 'Area (trigger)'], ['Camera2D', 'Camera'],
+                ['Text2D', 'Text'], ['Node2D', 'Node (group)'], ['SpriteAnimation', 'Sprite Animation'],
+              ].map(([cls, label]) => (
+                <div key={cls} className="menu-item" onClick={() => insertObject(cls)}><span><ClassIcon cls={cls} /> {label}</span><span className="menu-shortcut">{cls}</span></div>
+              ))}
+              <div className="menu-sep" />
+              <div className="menu-item" onClick={() => editor.mutate(() => { const w = editor.game.getService('World2D'); w.set('Enabled', !w.get('Enabled')) })}>
+                <span><Layers size={13} /> {ed.game.getService('World2D').get('Enabled') ? 'Switch place to 3D' : 'Switch place to 2D'}</span>
+              </div>
             </div>
           )}
         </Drop>
