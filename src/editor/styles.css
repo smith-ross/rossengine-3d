@@ -118,6 +118,18 @@ body.resizing { cursor: grabbing; }
 .tp-tile { border: 1px solid #0006; padding: 0; cursor: pointer; image-rendering: pixelated; background-repeat: no-repeat; border-radius: 2px; }
 .tp-tile:hover { outline: 1px solid #fff8; }
 .tp-tile.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sheet { padding: 8px; }
+.sheet-grid { position: relative; image-rendering: pixelated; background-repeat: no-repeat; background-color: #0004; border: 1px solid var(--border-2); max-width: 100%; }
+.sheet-cell { position: absolute; background: transparent; border: 1px solid #ffffff22; padding: 0; cursor: pointer; }
+.sheet-cell span { position: absolute; left: 2px; top: 1px; font-size: 9px; color: #fff; text-shadow: 0 0 2px #000; }
+.sheet-cell:hover { background: #4aa3ff22; }
+.sheet-cell.on { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sheet-cell.in-anim { background: #4aa3ff33; border-color: #4aa3ff88; }
+.sheet-cell.playing { outline: 2px solid var(--ok); outline-offset: -2px; }
+.sheet-info { margin: 6px 0; }
+.sheet-actions { flex-wrap: wrap; }
+.anim-preview { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.anim-frame { image-rendering: pixelated; background-repeat: no-repeat; background-color: #0004; border-radius: 4px; flex: none; }
 .script-layer { position: absolute; inset: 0; background: #1e1f24; z-index: 5; }
 .script-editor { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .script-banner { background: #4a3a10; color: #ffd88a; padding: 4px 10px; font-size: 12px; }

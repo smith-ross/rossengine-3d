@@ -273,7 +273,8 @@ export class Renderer2D {
       if (!v.tex || v.tex.source !== base.source) {
         v.tex = base.clone()
         ;(v.tex as any).__clone = true
-        v.tex.needsUpdate = true
+        // clones share the image source; it uploads itself once loaded
+        if (loaded(base)) v.tex.needsUpdate = true
       }
       mat.map = v.tex
       this.setMesh(v, PLANE)

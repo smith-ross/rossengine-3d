@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Upload } from 'lucide-react'
 import { AssetKind, assets, contentRef } from '../../engine/assets'
 import { importFiles, pickFiles } from '../assetOps'
 import { useAssets } from './AssetsPanel'
+import { SpriteTools } from './SpriteTools'
 
 const collapsed = new Set<string>()
 
@@ -58,6 +59,7 @@ export function Properties() {
             ))}
           </div>
         ))}
+        {sel.length === 1 && ['Sprite2D', 'AnimatedSprite2D', 'SpriteAnimation'].includes(first.className) && <SpriteTools inst={first} />}
         <Attributes inst={first} />
       </div>
     </div>

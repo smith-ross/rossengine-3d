@@ -116,6 +116,32 @@ await task.wait(1)
 - Python modules can't be imported relatively (`from . import x`), and a module whose name matches a standard-library module has to be loaded with `require`.
 - Python (Pyodide, about 14 MB) loads only when a place contains Python scripts. It is bundled into exported games, so they run offline.
 
+## 2D games
+
+Turn **World2D → Enabled** on (or start from **New 2D Place** / **2D Platformer**). The game then renders the 2D world instead of the 3D one, and no 3D avatar is spawned. The 2D world uses pixels, with y pointing down.
+
+| Class | What it is |
+| --- | --- |
+| `Node2D` | Transform (Position, Rotation, Scale, ZIndex). Children inherit it. |
+| `Sprite2D` | An image, or a sprite-sheet frame (`HFrames`/`VFrames`/`Frame`). Supports tint, flip, pivot, pixel-art filtering, and `ScrollFactor` for parallax. |
+| `AnimatedSprite2D` + `SpriteAnimation` | Named animations (`Frames = "2-5"`, `FPS`, `Loop`). Use `Play(name)`, `Stop()`, and the `AnimationFinished`/`FrameChanged` events. |
+| `TileMap` | A tileset image plus painted cells. `SolidTiles` sets which tiles collide. Has `SetCell`, `GetCell`, `WorldToCell`, `CellToWorld` and `GetUsedCells`. |
+| `CharacterBody2D` | Platformer movement: set `Velocity`, call `MoveAndSlide()`, then check `IsOnFloor()`/`IsOnWall()`/`IsOnCeiling()`. Gravity comes from `World2D.Gravity`. |
+| `RigidBody2D`, `StaticBody2D` | Physics bodies (Rapier 2D) with rectangle or circle shapes. Fire `Touched`/`TouchEnded`. |
+| `Area2D` | A trigger. Fires `BodyEntered`/`BodyExited`. |
+| `Camera2D` | Follows a target, with smoothing, zoom and offset. Has `ScreenToWorld`/`WorldToScreen`. |
+| `Text2D` | Text in the world, with an outline. |
+
+ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting language work in 2D as well.
+
+**2D editing:**
+- pan with the middle or right mouse button (or Space+drag) and zoom with the wheel;
+- drag objects to move them (they snap to the Move snap, in pixels) and drop images in to create sprites;
+- grid and collision-shape overlays can be toggled on;
+- sprite animations play live in the editor;
+- select a **TileMap** to paint with the tile palette: left click paints, right click erases, Shift+drag fills a rectangle;
+- the Properties panel shows a sprite's sheet: click frames to set `Frame`, or to build a `SpriteAnimation`'s frame list, and **Fit size to frame**.
+
 ## Assets
 
 Sounds, images and 3D models are imported from files and saved inside the place file, so a game never needs an external ID or URL.
