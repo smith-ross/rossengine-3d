@@ -59,13 +59,15 @@ function createWindow() {
     backgroundColor: '#17181c',
     show: false,
     webPreferences: {
+      backgroundThrottling: !process.env.ROSS_SMOKE_SCRIPT,
       preload: path.join(__dirname, 'studio-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   })
-  win.once('ready-to-show', () => { win.maximize(); win.show() })
+  // smoke tests run fully hidden (no window, no focus stealing)
+  if (!process.env.ROSS_SMOKE_SCRIPT) win.once('ready-to-show', () => { win.maximize(); win.show() })
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url)
     return { action: 'deny' }

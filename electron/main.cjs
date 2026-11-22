@@ -54,13 +54,15 @@ function createWindow() {
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
+      backgroundThrottling: !process.env.ROSS_SMOKE_TEST,
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   })
-  win.once('ready-to-show', () => win.show())
+  // smoke tests run fully hidden (no window, no focus stealing)
+  if (!process.env.ROSS_SMOKE_TEST) win.once('ready-to-show', () => win.show())
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
     if (input.key === 'F11') { win.setFullScreen(!win.isFullScreen()); event.preventDefault() }

@@ -288,6 +288,7 @@ export const Enums: Record<string, string[]> = {
   FillDirection: ['Horizontal', 'Vertical'],
   ScriptLanguage: ['Luau', 'TypeScript', 'Python'],
   CollisionFidelity: ['Box', 'Hull'],
+  Shape2D: ['Rectangle', 'Circle'],
   RaycastFilterType: ['Exclude', 'Include', 'Blacklist', 'Whitelist'],
   NormalId: ['Top', 'Bottom', 'Front', 'Back', 'Left', 'Right'],
 }

@@ -1,5 +1,6 @@
 // The built-in class library: Roblox-style Instances available to Luau scripts.
 import { CFrame, Color3, UDim, UDim2, Vector2, Vector3, enumItem, EnumItem } from './datatypes'
+import { register2DClasses } from './classes2d'
 import {
   DataModelLike, DataModelObserver, Instance, createInstance, defineClass, getClass, isA, setEnumResolver,
 } from './instance'
@@ -119,7 +120,7 @@ function removeTag(i: Instance, tag: string) {
 }
 
 // ---- DataModel ---------------------------------------------------------------
-export const SERVICE_ORDER = ['Workspace', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService']
+export const SERVICE_ORDER = ['Workspace', 'World2D', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService']
 /**
  * RossEngine games run entirely on the player's machine, so there is no server/client split:
  * one Script class, scripts run in ScriptService, and Storage holds modules and templates.
@@ -809,3 +810,6 @@ export function isScriptRunnable(s: Instance) {
   return isA(s.classInfo, 'BaseScript') && s.get('Enabled')
 }
 export { createInstance }
+
+// 2D classes (World2D, sprites, tilemaps, 2D physics bodies)
+register2DClasses()

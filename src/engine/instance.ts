@@ -19,6 +19,8 @@ export interface PropDef {
   category?: string
   /** For 'Content' properties: which kind of asset it references */
   content?: 'audio' | 'image' | 'mesh'
+  /** Save a virtual (get/set) property in place files anyway */
+  persist?: boolean
   /** Virtual property (derived from other state). */
   get?: (inst: any) => unknown
   set?: (inst: any, value: any) => void
@@ -329,8 +331,8 @@ export function serialize(root: Instance, includeRoot = true): SerializedInstanc
   const ser = (inst: Instance): SerializedInstance => {
     const props: Record<string, unknown> = {}
     for (const [name, def] of inst.classInfo.props) {
-      if (def.get || def.noSave || name === 'Parent') continue
-      props[name] = encodeValue(inst.props.get(name), refOf)
+      if ((def.get && !def.persist) || def.noSave || name === 'Parent') continue
+      props[name] = encodeValue(def.get ? def.get(inst) : inst.props.get(name), refOf)
     }
     props.Name = inst.name
     const out: SerializedInstance = { className: inst.className, ref: inst.id, props, children: [] }
@@ -373,7 +375,9 @@ export function deserialize(data: SerializedInstance, into?: Instance, byRef = n
         const target = inst
         pendingRefs.push(() => target.rawSet(name, byRef.get(r) ?? null))
       } else {
-        inst.rawSet(name, decodeValue(raw, () => null, enumResolver))
+        const value = decodeValue(raw, () => null, enumResolver)
+        if (def?.set && def.persist) def.set(inst, value)
+        else inst.rawSet(name, value)
       }
     }
     if (d.attributes) for (const [k, v] of Object.entries(d.attributes)) inst.attributes.set(k, decodeValue(v, () => null, enumResolver))
