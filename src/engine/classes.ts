@@ -33,8 +33,12 @@ export interface TweenInfoData {
   time: number; style: string; direction: string; repeatCount: number; reverses: boolean; delay: number
 }
 
+let activeRuntime: Runtime | null = null
+/** The running game (used for instances that are not parented to a DataModel, e.g. Tweens). */
+export function setActiveRuntime(r: Runtime | null) { activeRuntime = r }
+
 function rt(self: Instance): Runtime {
-  const r = (self.dataModel as DataModel | null)?.runtime
+  const r = (self.dataModel as DataModel | null)?.runtime ?? activeRuntime
   if (!r) throw new Error('This method can only be called while the game is running')
   return r
 }

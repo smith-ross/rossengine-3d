@@ -83,7 +83,8 @@ export class LuauRuntime {
     })
     fn('scriptError', (msg: string, tb: string, scriptId: number) => {
       const s = this.byId.get(scriptId)
-      this.output('error', msg + (tb ? '\n' + cleanTraceback(tb) : ''), s?.getFullName())
+      const clean = String(msg).split('\nstack traceback:')[0]
+      this.output('error', clean + (tb ? '\n' + cleanTraceback(tb) : ''), s?.getFullName())
     })
     fn('print', (kind: number, msg: string) => this.output(kind === 1 ? 'warn' : 'info', msg))
     fn('clock', () => Date.now() / 1000)

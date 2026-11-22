@@ -1092,6 +1092,23 @@ local methodCache = {} -- name -> fn
 
 local wrap -- forward
 
+-- Call into the host, re-raising errors at the user's call site (level 3) without the JS traceback.
+local function cleanErr(e)
+	local msg = tostring(e)
+	local i = string.find(msg, "\nstack traceback:", 1, true)
+	if i then
+		msg = string.sub(msg, 1, i - 1)
+	end
+	return msg
+end
+local function hostCall(f, ...)
+	local r = tpack(pcall(f, ...))
+	if not r[1] then
+		error(cleanErr(r[2]), 3)
+	end
+	return tunpack(r, 2, r.n)
+end
+
 -- encoding ------------------------------------------------------------------
 local function enc(buf, n, v)
 	local t = rawtypeof(v)
@@ -1315,7 +1332,7 @@ local function hostMethod(name)
 			error("Expected ':' not '.' calling member function " .. name, 2)
 		end
 		local buf, n = encAll(...)
-		return decodeAll(H.call(id, name, tunpack(buf, 1, n)))
+		return decodeAll(hostCall(H.call, id, name, tunpack(buf, 1, n)))
 	end
 	methodCache[name] = f
 	return f
@@ -1327,7 +1344,7 @@ local function instIndex(self, key)
 	local m = getMembers(cls)
 	local kind = m[key]
 	if kind == "P" or kind == "R" then
-		return decode1(H.get(id, key))
+		return decode1(hostCall(H.get, id, key))
 	elseif kind == "M" then
 		return hostMethod(key)
 	elseif kind == "E" then
@@ -1353,7 +1370,7 @@ local function instNewIndex(self, key, value)
 	local kind = getMembers(cls)[key]
 	if kind == "P" then
 		local buf, n = encAll(value)
-		H.set(id, key, tunpack(buf, 1, n))
+		hostCall(H.set, id, key, tunpack(buf, 1, n))
 		return
 	elseif kind == "L" then
 		local p = luaProps[id]
@@ -1445,7 +1462,7 @@ G.Instance = freeze({
 		if type(className) ~= "string" then
 			error("invalid argument #1 to 'new' (string expected)", 2)
 		end
-		local inst = decode1(H.new(className))
+		local inst = decode1(hostCall(H.new, className))
 		if parent ~= nil then
 			inst.Parent = parent
 		end
