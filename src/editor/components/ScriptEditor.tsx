@@ -5,10 +5,12 @@ import EditorWorker from '../../../node_modules/monaco-editor/esm/vs/editor/edit
 import TsWorker from '../../../node_modules/monaco-editor/esm/vs/languages/features/typescript/ts.worker.js?worker'
 import { registerLuau } from '../luau/language'
 import { checkScript, complete, typeAt } from '../luau/analysis'
-import { Instance, allClasses } from '../../engine/instance'
+import { Instance } from '../../engine/instance'
+import { DataModel } from '../../engine/classes'
+import { placeCompletions, pythonCompletions } from '../completion/providers'
 import { languageOf, ScriptLanguage } from '../../engine/scripting/languages'
 import {
-  MONACO_LANGUAGE, checkPython, loadPythonChecker, registerPythonCompletions, setupLanguages, syncTypeScriptWorkspace, uriFor,
+  MONACO_LANGUAGE, checkPython, loadPythonChecker, setupLanguages, syncTypeScriptWorkspace, uriFor,
 } from '../languages/setup'
 import { editor as store, useEditor } from '../store'
 
@@ -17,16 +19,6 @@ import { editor as store, useEditor } from '../store'
 }
 registerLuau()
 setupLanguages()
-registerPythonCompletions(() => {
-  const names = new Set<string>()
-  for (const c of allClasses()) {
-    for (const k of c.props.keys()) names.add(k)
-    for (const k of c.methods.keys()) names.add(k)
-    for (const k of c.events) names.add(k)
-  }
-  for (const k of ['Connect', 'Once', 'Wait', 'Disconnect', 'X', 'Y', 'Z', 'Magnitude', 'Unit', 'new', 'fromRGB', 'Angles', 'add', 'sub', 'mul', 'div', 'WaitForChild']) names.add(k)
-  return [...names].sort()
-})
 
 const models = new Map<Instance, monaco.editor.ITextModel>()
 const byUri = new Map<string, Instance>()
@@ -60,6 +52,8 @@ const KIND: Record<string, monaco.languages.CompletionItemKind> = {
   hotComment: monaco.languages.CompletionItemKind.Keyword,
 }
 
+const gameOf = (script: Instance) => (script.dataModel ?? store.game) as DataModel
+
 let providersRegistered = false
 function registerProviders() {
   if (providersRegistered) return
@@ -69,11 +63,23 @@ function registerProviders() {
     async provideCompletionItems(model, position) {
       const script = byUri.get(model.uri.toString())
       if (!script) return { suggestions: [] }
+      // 1. the place-aware resolver (children, services, locals, event parameters, string arguments)
+      const placed = placeCompletions(model, position, script, gameOf(script), 'Luau')
+      if (placed?.exclusive) return { suggestions: placed.items }
+      // 2. the Luau type checker for everything else
       const entries = await complete(script.id, model.getValue(), position.lineNumber - 1, position.column - 1)
       const word = model.getWordUntilPosition(position)
       const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
+      const lineBefore = model.getLineContent(position.lineNumber).slice(0, word.startColumn - 1)
+      const afterColon = /:\s*$/.test(lineBefore)
       const suggestions: monaco.languages.CompletionItem[] = (entries ?? [])
-        .filter((e) => !e.wrongIndexType && !e.label.startsWith('__'))
+        .filter((e) => {
+          if (!e.label || !e.label.trim() || e.wrongIndexType || e.label.startsWith('__') || e.label.startsWith('@')) return false
+          if (e.kind === 'type' && !/^[A-Za-z_]/.test(e.label)) return false
+          // after ':' only callable members make sense
+          if (afterColon && !(e.parentheses !== 'none' || (e.type && /->/.test(e.type)))) return false
+          return true
+        })
         .map((e) => {
           const isFn = !!e.type && /^\(?\s*\(?[^)]*\)?\s*->|^\(.*\) ->|^<.*>\(/.test(e.type) || e.parentheses !== 'none'
           let insert = e.insertText ?? e.label
@@ -92,6 +98,24 @@ function registerProviders() {
           }
         })
       return { suggestions }
+    },
+  })
+  // TypeScript: Monaco's TS service provides types; we add place children and string arguments
+  monaco.languages.registerCompletionItemProvider('typescript', {
+    triggerCharacters: ['.', '"', "'"],
+    provideCompletionItems(model, position) {
+      const script = byUri.get(model.uri.toString())
+      if (!script) return { suggestions: [] }
+      const placed = placeCompletions(model, position, script, gameOf(script), 'TypeScript', { childrenOnly: true })
+      return { suggestions: placed?.items ?? [] }
+    },
+  })
+  monaco.languages.registerCompletionItemProvider('python', {
+    triggerCharacters: ['.', '"', "'", ' '],
+    provideCompletionItems(model, position) {
+      const script = byUri.get(model.uri.toString())
+      if (!script) return { suggestions: [] }
+      return { suggestions: pythonCompletions(model, position, script, gameOf(script)) }
     },
   })
   monaco.languages.registerHoverProvider('luau', {
@@ -132,6 +156,8 @@ export function ScriptEditor({ script }: { script: Instance }) {
       bracketPairColorization: { enabled: true },
       guides: { indentation: true, bracketPairs: true },
       quickSuggestions: { other: true, comments: false, strings: true },
+      wordBasedSuggestions: 'off', // only real API/place suggestions, no random words from the file
+      suggest: { showWords: false, localityBonus: true, preview: true },
       suggestOnTriggerCharacters: true,
       fixedOverflowWidgets: true,
     })

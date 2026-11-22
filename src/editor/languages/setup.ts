@@ -100,27 +100,3 @@ export function checkPython(src: string): monaco.editor.IMarkerData[] | null {
   }]
 }
 
-/** Completions for Python scripts: the engine globals and their common members. */
-const PY_GLOBALS = ['game', 'workspace', 'script', 'Instance', 'Vector3', 'Vector2', 'CFrame', 'Color3', 'UDim', 'UDim2', 'Enum',
-  'TweenInfo', 'RaycastParams', 'task', 'wait', 'warn', 'tick', 'time', 'require']
-let pyProvider = false
-export function registerPythonCompletions(memberNames: () => string[]) {
-  if (pyProvider) return
-  pyProvider = true
-  monaco.languages.registerCompletionItemProvider('python', {
-    triggerCharacters: ['.'],
-    provideCompletionItems(model, position) {
-      const word = model.getWordUntilPosition(position)
-      const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
-      const before = model.getLineContent(position.lineNumber).slice(0, word.startColumn - 1)
-      const afterDot = before.endsWith('.')
-      const names = afterDot ? memberNames() : PY_GLOBALS
-      return {
-        suggestions: names.map((n) => ({
-          label: n, kind: afterDot ? monaco.languages.CompletionItemKind.Field : monaco.languages.CompletionItemKind.Variable,
-          insertText: n, range,
-        })),
-      }
-    },
-  })
-}
