@@ -116,7 +116,7 @@ export function demoPlace(): DataModel {
   const game = baseplatePlace()
   game.name = 'Coin Collector'
   const ws = game.workspace
-  const sss = game.getService('ServerScriptService')
+  const sss = game.getService('ScriptService')
   make('Script', { Name: 'CoinSpawner', Source: COIN_SERVER }, sss)
 
   // stairs + platform
@@ -165,6 +165,6 @@ export function demoPlace(): DataModel {
     TextSize: 28, Font: enumItem('Font', 'GothamBold'), AnchorPoint: new Vector2(0, 0),
   }, gui)
   make('UICorner', { CornerRadius: new UDim(0, 10) }, label)
-  make('LocalScript', { Name: 'HudController', Source: HUD_CLIENT }, gui)
+  make('Script', { Name: 'HudController', Source: HUD_CLIENT }, gui)
   return game
 }

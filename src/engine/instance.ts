@@ -344,12 +344,21 @@ export function serialize(root: Instance, includeRoot = true): SerializedInstanc
 }
 
 /** Build instances from serialized data. If `into` is given, the root's props/children are applied to it. */
+/** Renamed/merged classes, so places saved by older versions (or Roblox-style names) still load. */
+const CLASS_ALIASES: Record<string, string> = {
+  LocalScript: 'Script',
+  ServerScriptService: 'ScriptService',
+  ReplicatedStorage: 'Storage',
+  ServerStorage: 'Storage',
+}
+export function classAlias(name: string) { return CLASS_ALIASES[name] ?? name }
+
 export function deserialize(data: SerializedInstance, into?: Instance, byRef = new Map<number, Instance>()): Instance {
   const pendingRefs: Array<() => void> = []
   const build = (d: SerializedInstance, existing?: Instance): Instance => {
     let inst = existing
     if (!inst) {
-      const info = classes.get(d.className)
+      const info = classes.get(classAlias(d.className))
       if (!info) { console.warn(`Unknown class ${d.className}, using Folder`) }
       inst = info ? new info.ctor() : createInstance('Folder')
     }
@@ -369,8 +378,8 @@ export function deserialize(data: SerializedInstance, into?: Instance, byRef = n
     for (const cd of d.children) {
       let child: Instance | undefined
       // services already exist in a fresh DataModel; merge into them
-      if (existing && classes.get(cd.className)?.service) {
-        child = existing.children.find((c) => c.className === cd.className)
+      if (existing && classes.get(classAlias(cd.className))?.service) {
+        child = existing.children.find((c) => c.className === classAlias(cd.className))
       }
       const built = build(cd, child)
       if (!child) built.setParent(inst)

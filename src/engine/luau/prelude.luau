@@ -1486,59 +1486,6 @@ defineLua("BindableFunction", {
 		return cb(...)
 	end,
 })
--- Single-process networking: client and server live in the same VM.
-local function localPlayer()
-	return G.game:GetService("Players").LocalPlayer
-end
-local function remoteMethods(cls)
-	defineLua(cls, {
-		FireServer = function(self, ...)
-			local s = signalFor(idOf[self], "OnServerEvent")
-			local args = tpack(localPlayer(), ...)
-			task.defer(function()
-				s:_fire(tunpack(args, 1, args.n))
-			end)
-		end,
-		FireClient = function(self, _player, ...)
-			local s = signalFor(idOf[self], "OnClientEvent")
-			local args = tpack(...)
-			task.defer(function()
-				s:_fire(tunpack(args, 1, args.n))
-			end)
-		end,
-		FireAllClients = function(self, ...)
-			local s = signalFor(idOf[self], "OnClientEvent")
-			local args = tpack(...)
-			task.defer(function()
-				s:_fire(tunpack(args, 1, args.n))
-			end)
-		end,
-	})
-end
-remoteMethods("RemoteEvent")
-remoteMethods("UnreliableRemoteEvent")
-defineLuaProps("RemoteFunction", { "OnServerInvoke", "OnClientInvoke" })
-defineLua("RemoteFunction", {
-	InvokeServer = function(self, ...)
-		local id = idOf[self]
-		local cb = luaProps[id] and luaProps[id].OnServerInvoke
-		while not cb do
-			task.wait()
-			cb = luaProps[id] and luaProps[id].OnServerInvoke
-		end
-		return cb(localPlayer(), ...)
-	end,
-	InvokeClient = function(self, _player, ...)
-		local id = idOf[self]
-		local cb = luaProps[id] and luaProps[id].OnClientInvoke
-		while not cb do
-			task.wait()
-			cb = luaProps[id] and luaProps[id].OnClientInvoke
-		end
-		return cb(...)
-	end,
-})
-
 -- RunService:BindToRenderStep
 local renderBindings = {}
 defineLua("RunService", {

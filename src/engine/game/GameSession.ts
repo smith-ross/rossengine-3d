@@ -122,18 +122,11 @@ export class GameSession implements Runtime {
   }
 
   // ------------------------------------------------------------------ scripts
+  /** Scripts run in the Workspace, ScriptService and under Players (GUIs, characters). Storage, StarterGui etc. hold templates. */
   private scriptLocationOk(s: Instance) {
+    if (s.className !== 'Script') return false
     const g = this.game
-    if (s.className === 'Script') {
-      return s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('ServerScriptService'))
-    }
-    if (s.className === 'LocalScript') {
-      const p = this.player
-      if (!p) return false
-      const ch = p.get<Instance | null>('Character')
-      return s.isDescendantOf(p) || (!!ch && s.isDescendantOf(ch))
-    }
-    return false
+    return s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('ScriptService')) || s.isDescendantOf(g.getService('Players'))
   }
 
   private maybeRunScript(s: Instance) {
@@ -176,7 +169,7 @@ export class GameSession implements Runtime {
     p.rawSet('UserId', 1)
     p.rawSet('DisplayName', p.name)
     const mouse = createInstance('Mouse'); mouse.name = '__Mouse'; mouse.setParent(p); this.mouseObj = mouse
-    for (const n of ['Backpack', 'PlayerGui', 'PlayerScripts']) { const c = createInstance(n); c.setParent(p) }
+    createInstance('PlayerGui').setParent(p)
     this.player = p
     players.rawSet('LocalPlayer', p)
     p.setParent(players)
@@ -185,9 +178,6 @@ export class GameSession implements Runtime {
     const playerGui = p.findFirstChild('PlayerGui')!
     for (const g of this.game.getService('StarterGui').children) g.clone().setParent(playerGui)
     this.gui.setSource(playerGui)
-    const sp = this.game.getService('StarterPlayer')
-    const sps = sp.findFirstChild('StarterPlayerScripts')
-    if (sps) for (const s of sps.children) s.clone().setParent(p.findFirstChild('PlayerScripts')!)
     if (players.get('CharacterAutoLoads')) this.loadCharacter(p)
   }
 

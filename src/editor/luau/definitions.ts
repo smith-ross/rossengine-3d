@@ -61,8 +61,6 @@ const SIGS: Record<string, string> = {
   'Humanoid.GetState': '(self): EnumItem',
   'Lighting.GetMinutesAfterMidnight': '(self): number',
   'Lighting.SetMinutesAfterMidnight': '(self, minutes: number): ()',
-  'RunService.IsClient': '(self): boolean',
-  'RunService.IsServer': '(self): boolean',
   'RunService.IsStudio': '(self): boolean',
   'RunService.IsRunning': '(self): boolean',
   'RunService.BindToRenderStep': '(self, name: string, priority: number, fn: (deltaTime: number) -> ()): ()',
@@ -91,11 +89,6 @@ const SIGS: Record<string, string> = {
   'Sound.Resume': '(self): ()',
   'BindableEvent.Fire': '(self, ...: any): ()',
   'BindableFunction.Invoke': '(self, ...: any): ...any',
-  'RemoteEvent.FireServer': '(self, ...: any): ()',
-  'RemoteEvent.FireClient': '(self, player: Player, ...: any): ()',
-  'RemoteEvent.FireAllClients': '(self, ...: any): ()',
-  'RemoteFunction.InvokeServer': '(self, ...: any): ...any',
-  'RemoteFunction.InvokeClient': '(self, player: Player, ...: any): ...any',
   'DataModel.IsLoaded': '(self): boolean',
 }
 
@@ -104,15 +97,11 @@ const LUA_METHODS: Record<string, string[]> = {
   Instance: ['WaitForChild', 'GetPropertyChangedSignal', 'GetAttributeChangedSignal'],
   BindableEvent: ['Fire'],
   BindableFunction: ['Invoke'],
-  RemoteEvent: ['FireServer', 'FireClient', 'FireAllClients'],
-  UnreliableRemoteEvent: ['FireServer', 'FireClient', 'FireAllClients'],
-  RemoteFunction: ['InvokeServer', 'InvokeClient'],
   RunService: ['BindToRenderStep', 'UnbindFromRenderStep'],
   ContextActionService: ['BindAction', 'UnbindAction'],
 }
 const LUA_PROPS: Record<string, string[]> = {
   BindableFunction: ['OnInvoke: ((...any) -> ...any)?'],
-  RemoteFunction: ['OnServerInvoke: ((player: Player, ...any) -> ...any)?', 'OnClientInvoke: ((...any) -> ...any)?'],
 }
 
 /** More precise types for some properties and well-known children. */
@@ -120,8 +109,6 @@ const PROP_OVERRIDES: Record<string, string> = {
   'Players.LocalPlayer': 'Player',
   'Player.Character': 'Model?',
   'Player.PlayerGui': 'PlayerGui',
-  'Player.Backpack': 'Backpack',
-  'Player.PlayerScripts': 'PlayerScripts',
   'Workspace.CurrentCamera': 'Camera',
   'Model.PrimaryPart': 'BasePart?',
   'Humanoid.RootPart': 'BasePart?',
@@ -130,9 +117,8 @@ const PROP_OVERRIDES: Record<string, string> = {
   'DataModel.Workspace': 'Workspace',
   'DataModel.Players': 'Players',
   'DataModel.Lighting': 'Lighting',
-  'DataModel.ReplicatedStorage': 'ReplicatedStorage',
-  'DataModel.ServerScriptService': 'ServerScriptService',
-  'DataModel.ServerStorage': 'ServerStorage',
+  'DataModel.ScriptService': 'ScriptService',
+  'DataModel.Storage': 'Storage',
   'DataModel.StarterGui': 'StarterGui',
   'DataModel.StarterPlayer': 'StarterPlayer',
   'Instance.Parent': 'Instance?',

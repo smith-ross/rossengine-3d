@@ -18,9 +18,8 @@ export function defaultParentFor(className: string): Instance {
     // insert into the selected container
     return sel
   }
-  if (className === 'Script') return g.getService('ServerScriptService')
-  if (className === 'LocalScript') return g.getService('StarterPlayer').findFirstChild('StarterPlayerScripts') ?? g.workspace
-  if (className === 'ModuleScript') return g.getService('ReplicatedStorage')
+  if (className === 'Script') return g.getService('ScriptService')
+  if (className === 'ModuleScript') return g.getService('Storage')
   if (className === 'ScreenGui') return g.getService('StarterGui')
   return g.workspace
 }

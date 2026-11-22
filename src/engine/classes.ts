@@ -119,10 +119,16 @@ function removeTag(i: Instance, tag: string) {
 }
 
 // ---- DataModel ---------------------------------------------------------------
-export const SERVICE_ORDER = [
-  'Workspace', 'Players', 'Lighting', 'ReplicatedStorage', 'ServerScriptService', 'ServerStorage',
-  'StarterGui', 'StarterPlayer', 'SoundService',
-]
+export const SERVICE_ORDER = ['Workspace', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService']
+/**
+ * RossEngine games run entirely on the player's machine, so there is no server/client split:
+ * one Script class, scripts run in ScriptService, and Storage holds modules and templates.
+ * Roblox names are accepted as aliases so familiar code (and older places) keep working.
+ */
+export const SERVICE_ALIASES: Record<string, string> = {
+  ServerScriptService: 'ScriptService', ReplicatedStorage: 'Storage', ServerStorage: 'Storage',
+  ReplicatedFirst: 'ScriptService',
+}
 // non-visible services, created on demand by GetService
 const HIDDEN_SERVICES = ['RunService', 'UserInputService', 'TweenService', 'Debris', 'HttpService', 'CollectionService', 'ContextActionService']
 
@@ -138,11 +144,17 @@ export class DataModel extends Instance implements DataModelLike {
   initServices() {
     for (const s of SERVICE_ORDER) this.getService(s)
     const sp = this.getService('StarterPlayer')
-    if (!sp.findFirstChild('StarterPlayerScripts')) createInstance('StarterPlayerScripts').setParent(sp)
+    // migrate older places: StarterPlayerScripts -> ScriptService
+    const sps = sp.findFirstChild('StarterPlayerScripts')
+    if (sps) {
+      for (const c of [...sps.children]) c.setParent(this.getService('ScriptService'))
+      sps.destroy()
+    }
     if (!sp.findFirstChild('StarterCharacterScripts')) createInstance('StarterCharacterScripts').setParent(sp)
     return this
   }
   getService(name: string): Instance {
+    name = SERVICE_ALIASES[name] ?? name
     const existing = this.children.find((c) => c.className === name)
     if (existing) return existing
     const info = getClass(name)
@@ -168,7 +180,10 @@ defineClass(DataModel, {
   },
   methods: {
     GetService: (self: DataModel, name: unknown) => self.getService(str(name)),
-    FindService: (self: DataModel, name: unknown) => self.children.find((c) => c.className === name) ?? null,
+    FindService: (self: DataModel, name: unknown) => {
+      const n = SERVICE_ALIASES[str(name)] ?? str(name)
+      return self.children.find((c) => c.className === n) ?? null
+    },
     IsLoaded: () => true,
   },
 })
@@ -416,11 +431,6 @@ defineClass(Script, {
   name: 'Script', superclass: 'BaseScript', category: 'Scripts',
   props: { Source: { type: 'string', hidden: true, default: () => 'print("Hello world!")\n' } },
 })
-export class LocalScript extends Script {}
-defineClass(LocalScript, {
-  name: 'LocalScript', superclass: 'Script', category: 'Scripts',
-  props: { Source: { type: 'string', hidden: true, default: () => 'print("Hello world!")\n' } },
-})
 export class ModuleScript extends LuaSourceContainer {}
 defineClass(ModuleScript, {
   name: 'ModuleScript', superclass: 'LuaSourceContainer', category: 'Scripts',
@@ -446,8 +456,7 @@ valueClass('ObjectValue', 'Instance')
 
 // These are implemented mostly on the Luau side (see prelude) so arbitrary Luau values pass through.
 for (const [name, events] of [
-  ['BindableEvent', ['Event']], ['BindableFunction', []], ['RemoteEvent', ['OnServerEvent', 'OnClientEvent']],
-  ['RemoteFunction', []], ['UnreliableRemoteEvent', ['OnServerEvent', 'OnClientEvent']],
+  ['BindableEvent', ['Event']], ['BindableFunction', []],
 ] as const) {
   class C extends Instance {}
   Object.defineProperty(C, 'name', { value: name })
@@ -500,7 +509,7 @@ defineClass(Mouse, {
   },
   events: ['Button1Down', 'Button1Up', 'Button2Down', 'Button2Up', 'Move', 'WheelForward', 'WheelBackward', 'KeyDown', 'KeyUp'],
 })
-for (const name of ['PlayerGui', 'Backpack', 'PlayerScripts']) {
+for (const name of ['PlayerGui']) {
   class C extends Instance {}
   Object.defineProperty(C, 'name', { value: name })
   defineClass(C, { name, superclass: 'Instance', creatable: false })
@@ -564,9 +573,8 @@ service('Lighting', {
   GetMinutesAfterMidnight: (self: Instance) => self.get<number>('ClockTime') * 60,
   SetMinutesAfterMidnight: (self: Instance, m: unknown) => self.set('ClockTime', (Number(m) / 60) % 24),
 })
-service('ReplicatedStorage')
-service('ServerScriptService')
-service('ServerStorage')
+service('ScriptService')
+service('Storage')
 service('StarterGui')
 service('SoundService')
 service('StarterPlayer', {
@@ -575,13 +583,13 @@ service('StarterPlayer', {
   CameraMaxZoomDistance: { type: 'number', default: () => 128, category: 'Camera' },
   CameraMinZoomDistance: { type: 'number', default: () => 0.5, category: 'Camera' },
 })
-for (const name of ['StarterPlayerScripts', 'StarterCharacterScripts']) {
+for (const name of ['StarterCharacterScripts']) {
   class C extends Instance {}
   Object.defineProperty(C, 'name', { value: name })
   defineClass(C, { name, superclass: 'Instance', creatable: false })
 }
 service('RunService', {}, {
-  IsClient: () => true, IsServer: () => true, IsStudio: () => false, IsRunning: () => true,
+  IsStudio: () => false, IsRunning: () => true,
   IsRunMode: () => false, IsEdit: () => false,
 }, ['Heartbeat', 'RenderStepped', 'Stepped', 'PreSimulation', 'PostSimulation'])
 service('UserInputService', {

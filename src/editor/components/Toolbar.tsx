@@ -62,7 +62,6 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
           )}
         </div>
         <button className="tool" disabled={playing} onClick={() => insertObject('Script')} title="Insert Script"><span className="tool-icon">📜</span><span>Script</span></button>
-        <button className="tool" disabled={playing} onClick={() => insertObject('LocalScript')} title="Insert LocalScript"><span className="tool-icon">📜</span><span>LocalScript</span></button>
         <div className="dropdown">
           <button className="tool" disabled={playing} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}><span className="tool-icon">＋</span><span>Object ▾</span></button>
           {menu === 'insert' && <div className="dropdown-anchor"><InsertMenu onDone={close} /></div>}

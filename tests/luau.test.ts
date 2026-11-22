@@ -81,10 +81,10 @@ describe('luau bridge', () => {
     const rt = await LuauRuntime.create(game, (k, m) => out.push(`${k}: ${m}`))
     const m = createInstance('ModuleScript'); m.name = 'Util'
     m.set('Source', 'local M = {} function M.add(a: number, b: number): number return a + b end return M')
-    m.setParent(game.getService('ReplicatedStorage'))
+    m.setParent(game.getService('Storage'))
     const s = createInstance('Script')
-    s.set('Source', 'local U = require(game.ReplicatedStorage.Util) print(U.add(2, 3)) print(require(game.ReplicatedStorage:WaitForChild("Util")) == U)')
-    s.setParent(game.getService('ServerScriptService'))
+    s.set('Source', 'local U = require(game.Storage.Util) print(U.add(2, 3)) print(require(game:GetService("ReplicatedStorage"):WaitForChild("Util")) == U)')
+    s.setParent(game.getService('ScriptService'))
     rt.runScript(s)
     expect(out).toEqual(['info: 5', 'info: true'])
   })
