@@ -1,7 +1,7 @@
 // 2D edit viewport: pan/zoom, select & drag nodes, paint tiles, preview sprite animations.
 import { useEffect, useRef, useState } from 'react'
 import { Brush, Eraser, Grid3x3, Shapes, SquareDashed } from 'lucide-react'
-import { Vector2 } from '../../engine/datatypes'
+import { EnumItem, Vector2, enumItem } from '../../engine/datatypes'
 import { Instance, createInstance } from '../../engine/instance'
 import { TileMap, isNode2D, setWorldPosition, worldPosition } from '../../engine/classes2d'
 import { Renderer2D } from '../../engine/render/Renderer2D'
@@ -14,7 +14,7 @@ import { ASSET_DRAG_TYPE } from './AssetsPanel'
 
 /** editor 2D camera, kept across rebuilds */
 export const view2d = { x: 0, y: 0, zoom: 2 }
-export const tileTool = { tile: 0, mode: 'paint' as 'paint' | 'erase' | 'rect' }
+export const tileTool = { tile: 0, mode: 'paint' as 'paint' | 'erase' | 'rect', terrain: null as string | null }
 const overlays = { grid: true, collision: true }
 
 /** pick the thing users mean: the physics body (or top-level node) rather than its sprite */
@@ -73,7 +73,9 @@ export function Viewport2D() {
       if (paint.last === key) return
       paint.last = key
       if (paint.rectFrom) return
-      paint.map.setCell(c.x, c.y, paint.erase ? -1 : tileTool.tile)
+      const terrain = tileTool.terrain && paint.map.terrain(tileTool.terrain)
+      if (terrain) paint.map.setCellTerrain(c.x, c.y, paint.erase ? null : terrain)
+      else paint.map.setCell(c.x, c.y, paint.erase ? -1 : tileTool.tile)
     }
 
     const onDown = (e: MouseEvent) => {
@@ -121,8 +123,10 @@ export function Viewport2D() {
       if (paint) {
         if (paint.rectFrom) {
           const a = paint.rectFrom, b = cellAt(paint.map, world(e))
+          const terrain = tileTool.terrain && paint.map.terrain(tileTool.terrain)
           for (let x = Math.min(a.x, b.x); x <= Math.max(a.x, b.x); x++) for (let y = Math.min(a.y, b.y); y <= Math.max(a.y, b.y); y++) {
-            paint.map.setCell(x, y, paint.erase ? -1 : tileTool.tile, false)
+            if (terrain) paint.map.setCellTerrain(x, y, paint.erase ? null : terrain, false)
+            else paint.map.setCell(x, y, paint.erase ? -1 : tileTool.tile, false)
           }
           paint.map.changed('Cells')
         }
@@ -250,6 +254,38 @@ function TilePalette({ map }: { map: TileMap }) {
   const rows = img ? Math.max(1, Math.floor(img.h / ts.y)) : 2
   const scale = Math.max(1, Math.floor(36 / Math.max(ts.x, ts.y)))
   const set = (p: Partial<typeof tileTool>) => { Object.assign(tileTool, p); force((x) => x + 1) }
+  const terrains = map.terrains()
+  if (tileTool.terrain && !terrains.some((t) => t.name === tileTool.terrain)) tileTool.terrain = null
+  const active = tileTool.terrain ? map.terrain(tileTool.terrain) : null
+  const activeTiles = new Set(active ? map.terrainTiles(active) : [])
+  const [adding, setAdding] = useState(false)
+  /** Create a terrain whose tile block starts at the selected palette tile. */
+  const addTerrain = (mode: 'Block3x3' | 'Block3x3Inner' | 'Cardinal16') => {
+    const s = tileTool.tile
+    const at = (r: number, c: number) => s + r * cols + c
+    let tiles: number[]
+    if (mode === 'Cardinal16') tiles = Array.from({ length: 16 }, (_, i) => at(Math.floor(i / 4), i % 4))
+    else {
+      tiles = [at(0, 0), at(0, 1), at(0, 2), at(1, 0), at(1, 1), at(1, 2), at(2, 0), at(2, 1), at(2, 2)]
+      if (mode === 'Block3x3Inner') tiles.push(at(0, 3), at(0, 4), at(1, 3), at(1, 4))
+    }
+    editor.mutate(() => {
+      const t = createInstance('TileTerrain')
+      t.name = `Terrain${terrains.length + 1}`
+      t.set('Mode', enumItem('TerrainMode', mode))
+      t.set('Tiles', tiles.join(', '))
+      t.setParent(map)
+      tileTool.terrain = t.name
+    })
+    setAdding(false)
+  }
+  const tileStyle = (i: number, size: number): React.CSSProperties => ({
+    width: size, height: size,
+    backgroundImage: img ? `url("${img.url}")` : undefined,
+    backgroundColor: img ? undefined : `hsl(${(i * 0.13 % 1) * 360}, 55%, 55%)`,
+    backgroundSize: img ? `${(img.w / ts.x) * size}px ${(img.h / ts.y) * size}px` : undefined,
+    backgroundPosition: img ? `-${(i % cols) * size}px -${Math.floor(i / cols) * size}px` : undefined,
+  })
   return (
     <div className="tile-palette">
       <div className="tp-head">
@@ -260,14 +296,45 @@ function TilePalette({ map }: { map: TileMap }) {
           <button className={tileTool.mode === 'erase' ? 'on' : ''} onClick={() => set({ mode: 'erase' })} title="Erase"><Eraser size={12} /></button>
         </div>
       </div>
+      <div className="tp-section">
+        <div className="tp-label">Brush</div>
+        <div className="tp-terrains">
+          <button className={`tp-terrain${!active ? ' on' : ''}`} onClick={() => set({ terrain: null })} title="Paint single tiles">
+            <span className="tp-swatch" style={tileStyle(tileTool.tile, 18)} /> Single tile
+          </button>
+          {terrains.map((t) => {
+            const tiles = map.terrainTiles(t)
+            return (
+              <button key={t.id} className={`tp-terrain${active === t ? ' on' : ''}`} onClick={() => set({ terrain: t.name, mode: tileTool.mode === 'erase' ? 'paint' : tileTool.mode })}
+                onDoubleClick={() => editor.select([t])} title={`${t.name} (${t.get<EnumItem>('Mode')?.name}) — auto-tiles as you paint. Double-click to edit.`}>
+                <span className="tp-swatch" style={tileStyle(tiles[Math.min(4, tiles.length - 1)] ?? 0, 18)} /> {t.name}
+              </button>
+            )
+          })}
+        </div>
+        {adding ? (
+          <div className="tp-add">
+            <div className="muted small">New terrain from the selected tile ({tileTool.tile}) as the top-left of:</div>
+            <button className="btn small" onClick={() => addTerrain('Block3x3')}>3×3 block (edges + corners)</button>
+            <button className="btn small" onClick={() => addTerrain('Block3x3Inner')}>3×3 + inner corners (2×2 to its right)</button>
+            <button className="btn small" onClick={() => addTerrain('Cardinal16')}>4×4 block (16-tile cardinal)</button>
+            <button className="btn small" onClick={() => setAdding(false)}>Cancel</button>
+          </div>
+        ) : (
+          <div className="row-inline">
+            <button className="btn small" onClick={() => setAdding(true)} title="Make an auto-tiling terrain from a block of tiles">+ Terrain</button>
+            {terrains.length > 0 && <button className="btn small" onClick={() => editor.mutate(() => map.updateTerrain())} title="Re-pick every terrain cell's tile">Re-tile map</button>}
+          </div>
+        )}
+      </div>
       {!img && <div className="muted small pad">No TileSet image — set the TileMap's <b>TileSet</b> property (tiles are drawn as coloured squares until then).</div>}
       <div className="tp-grid" style={{ gridTemplateColumns: `repeat(${cols}, ${ts.x * scale}px)` }}>
         {Array.from({ length: cols * rows }, (_, i) => (
           <button
             key={i}
-            className={`tp-tile${tileTool.tile === i ? ' on' : ''}`}
+            className={`tp-tile${!active && tileTool.tile === i ? ' on' : ''}${activeTiles.has(i) ? ' terrain' : ''}`}
             title={`Tile ${i}`}
-            onClick={() => set({ tile: i, mode: tileTool.mode === 'erase' ? 'paint' : tileTool.mode })}
+            onClick={() => set({ tile: i, terrain: adding ? tileTool.terrain : null, mode: tileTool.mode === 'erase' ? 'paint' : tileTool.mode })}
             style={{
               width: ts.x * scale, height: ts.y * scale,
               backgroundImage: img ? `url("${img.url}")` : undefined,

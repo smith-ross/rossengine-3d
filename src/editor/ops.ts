@@ -40,6 +40,7 @@ export function defaultParentFor(className: string): Instance {
     // inside the selected 2D node, otherwise at the top of the 2D world
     return sel && isA(sel.className, 'Node2D') ? sel : g.getService('World2D')
   }
+  if (className === 'TileTerrain') return sel?.className === 'TileMap' ? sel : sel?.parent?.className === 'TileMap' ? sel.parent : g.getService('World2D')
   if (className === 'SpriteAnimation') return sel?.className === 'AnimatedSprite2D' ? sel : (sel?.parent?.className === 'AnimatedSprite2D' ? sel.parent : g.getService('World2D'))
   if (className === 'Script') return g.getService('ScriptService')
   if (className === 'ModuleScript') return g.getService('Storage')

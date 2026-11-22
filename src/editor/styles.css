@@ -117,6 +117,14 @@ body.resizing { cursor: grabbing; }
 .tp-grid { display: grid; gap: 2px; padding: 8px; }
 .tp-tile { border: 1px solid #0006; padding: 0; cursor: pointer; image-rendering: pixelated; background-repeat: no-repeat; border-radius: 2px; }
 .tp-tile:hover { outline: 1px solid #fff8; }
+.tp-tile.terrain { box-shadow: inset 0 0 0 2px #57c26acc; }
+.tp-section { padding: 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.tp-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+.tp-terrains { display: flex; flex-wrap: wrap; gap: 4px; }
+.tp-terrain { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 3px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 5px; cursor: pointer; font-size: 12px; }
+.tp-terrain.on { border-color: var(--accent); background: var(--sel); }
+.tp-swatch { display: inline-block; image-rendering: pixelated; background-repeat: no-repeat; border-radius: 2px; flex: none; }
+.tp-add { display: flex; flex-direction: column; gap: 4px; }
 .tp-tile.on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sheet { padding: 8px; }
 .sheet-grid { position: relative; image-rendering: pixelated; background-repeat: no-repeat; background-color: #0004; border: 1px solid var(--border-2); max-width: 100%; }

@@ -1,6 +1,6 @@
 // 2D game classes: World2D, Node2D hierarchy, sprites + animation, tilemaps, 2D physics bodies.
 // Coordinates are pixels with y pointing down; rotations are degrees, clockwise.
-import { Color3, Vector2, enumItem } from './datatypes'
+import { Color3, EnumItem, Vector2, enumItem } from './datatypes'
 import { Instance, defineClass, isA } from './instance'
 
 /** Provided by the running game (GameSession) for methods that need physics or the viewport. */
@@ -93,6 +93,15 @@ export class AnimatedSprite2D extends Sprite2D {}
 
 class SpriteAnimation extends Instance {}
 
+/**
+ * Auto-tiling rules for a TileMap (child of the TileMap). Tiles lists the tileset indices in the
+ * order the Mode expects:
+ *   Block3x3       9 tiles: top-left, top, top-right, left, centre, right, bottom-left, bottom, bottom-right
+ *   Block3x3Inner  those 9 + inner corners: top-left, top-right, bottom-left, bottom-right
+ *   Cardinal16     16 tiles indexed by neighbours: up=1, right=2, down=4, left=8
+ */
+export class TileTerrain extends Instance {}
+
 /** "0-3, 6, 8-6" -> [0,1,2,3,6,8,7,6] */
 export function parseFrames(spec: string): number[] {
   const out: number[] = []
@@ -128,6 +137,62 @@ export class TileMap extends Node2D {
       if (m) this.cells.set(`${m[1]},${m[2]}`, Number(m[3]))
     }
   }
+  // ---- auto-tiling ------------------------------------------------------------------------------
+  /** TileTerrain children by name */
+  terrains(): Instance[] { return this.children.filter((c) => c.className === 'TileTerrain') }
+  terrain(name: string): Instance | null { return this.terrains().find((t) => t.name === name) ?? null }
+  terrainTiles(t: Instance): number[] { return parseFrames(t.get<string>('Tiles')) }
+  /** The terrain a cell belongs to (its tile is one of the terrain's tiles). */
+  terrainAt(x: number, y: number): Instance | null {
+    const tile = this.getCell(x, y)
+    if (tile < 0) return null
+    for (const t of this.terrains()) if (this.terrainTiles(t).includes(tile)) return t
+    return null
+  }
+  /** Paint (or erase, with null) a terrain cell and re-pick the tiles of it and its neighbours. */
+  setCellTerrain(x: number, y: number, terrain: Instance | string | null, notify = true) {
+    x = Math.floor(x); y = Math.floor(y)
+    const t = typeof terrain === 'string' ? this.terrain(terrain) : terrain
+    if (typeof terrain === 'string' && !t) throw new Error(`TileMap "${this.name}" has no TileTerrain named "${terrain}"`)
+    if (t) {
+      const tiles = this.terrainTiles(t)
+      if (!tiles.length) throw new Error(`TileTerrain "${t.name}" has no Tiles set`)
+      // placeholder: any tile of the terrain marks membership; the real tile is picked below
+      this.cells.set(this.key(x, y), tiles[Math.min(4, tiles.length - 1)])
+    } else this.cells.delete(this.key(x, y))
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.retile(x + dx, y + dy)
+    if (notify) this.changed('Cells')
+  }
+  /** Re-pick every terrain cell's tile (after editing Tiles or painting plain tiles). */
+  updateTerrain(notify = true) {
+    for (const k of [...this.cells.keys()]) { const [x, y] = k.split(',').map(Number); this.retile(x, y) }
+    if (notify) this.changed('Cells')
+  }
+  private retile(x: number, y: number) {
+    const t = this.terrainAt(x, y)
+    if (!t) return
+    const tiles = this.terrainTiles(t)
+    const same = (dx: number, dy: number) => this.terrainAt(x + dx, y + dy) === t
+    const n = same(0, -1), s = same(0, 1), e = same(1, 0), w = same(-1, 0)
+    const mode = t.get<EnumItem>('Mode')?.name ?? 'Block3x3'
+    let tile: number | undefined
+    if (mode === 'Cardinal16') {
+      tile = tiles[(n ? 1 : 0) | (e ? 2 : 0) | (s ? 4 : 0) | (w ? 8 : 0)]
+    } else {
+      const row = !n ? 0 : !s ? 2 : 1
+      const col = !w ? 0 : !e ? 2 : 1
+      let i = row * 3 + col
+      if (i === 4 && mode === 'Block3x3Inner' && tiles.length >= 13) {
+        if (!same(-1, -1)) i = 9
+        else if (!same(1, -1)) i = 10
+        else if (!same(-1, 1)) i = 11
+        else if (!same(1, 1)) i = 12
+      }
+      tile = tiles[i]
+    }
+    if (tile !== undefined) this.cells.set(this.key(x, y), tile)
+  }
+
   /** Tiles marked solid ("all", "", or a list like "0-3, 7"). */
   solidSet(): Set<number> | 'all' {
     const s = String(this.get('SolidTiles') ?? '').trim().toLowerCase()
@@ -167,6 +232,13 @@ let registered = false
 export function register2DClasses() {
   if (registered) return
   registered = true
+  defineClass(TileTerrain, {
+    name: 'TileTerrain', superclass: 'Instance', category: '2D',
+    props: {
+      Mode: { type: 'Enum.TerrainMode', default: () => enumItem('TerrainMode', 'Block3x3'), category: 'Terrain' },
+      Tiles: { type: 'string', category: 'Terrain' },
+    },
+  })
   defineClass(World2D, {
     name: 'World2D', superclass: 'Instance', creatable: false, service: true,
     props: {
@@ -251,7 +323,10 @@ export function register2DClasses() {
       ClearCell: (self: TileMap, x: number, y: number) => self.setCell(Number(x), Number(y), -1),
       Clear: (self: TileMap) => { self.cells.clear(); self.changed('Cells') },
       GetUsedCells: (self: TileMap) => [...self.cells.keys()].map((k) => { const [x, y] = k.split(',').map(Number); return new Vector2(x, y) }),
-      WorldToCell: (self: TileMap, p: Vector2) => {
+      SetCellTerrain: (self: TileMap, x: number, y: number, terrain: unknown) => self.setCellTerrain(Number(x), Number(y), terrain == null ? null : String(terrain)),
+    GetCellTerrain: (self: TileMap, x: number, y: number) => self.terrainAt(Number(x), Number(y))?.name ?? null,
+    UpdateTerrain: (self: TileMap) => self.updateTerrain(),
+    WorldToCell: (self: TileMap, p: Vector2) => {
         const l = apply(invert(worldXform(self)), p.x, p.y), ts = self.get<Vector2>('TileSize')
         return new Vector2(Math.floor(l.x / ts.x), Math.floor(l.y / ts.y))
       },

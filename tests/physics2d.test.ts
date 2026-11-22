@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import '../src/engine/classes'
 import { DataModel } from '../src/engine/classes'
 import { Instance, addEventSink, createInstance } from '../src/engine/instance'
-import { Vector2 } from '../src/engine/datatypes'
+import { Vector2, enumItem } from '../src/engine/datatypes'
 import { TileMap, parseFrames, worldPosition } from '../src/engine/classes2d'
 import { Physics2D, initPhysics2D } from '../src/engine/physics/Physics2D'
 import { Animator2D } from '../src/engine/game/Animator2D'
@@ -82,5 +82,53 @@ describe('2D animation and tilemaps', () => {
     expect(copy.getCell(1, 2)).toBe(3)
     expect(copy.getCell(-4, 0)).toBe(1)
     expect(copy.getCell(0, 0)).toBe(-1)
+  })
+})
+
+describe('auto-tiling', () => {
+  // 3x3 block at tiles 0-2 / 8-10 / 16-18 plus inner corners 3, 4, 11, 12 (8-column tileset)
+  const TILES = '0, 1, 2, 8, 9, 10, 16, 17, 18, 3, 4, 11, 12'
+  const setup = (mode = 'Block3x3Inner', tiles = TILES) => {
+    const { w2d } = world()
+    const map = make('TileMap', {}, w2d) as TileMap
+    make('TileTerrain', { Name: 'Grass', Mode: enumItem('TerrainMode', mode), Tiles: tiles }, map)
+    return map
+  }
+  const grid = (map: TileMap, x0: number, y0: number, x1: number, y1: number) => {
+    const rows: string[] = []
+    for (let y = y0; y <= y1; y++) { const r: string[] = []; for (let x = x0; x <= x1; x++) r.push(String(map.getCell(x, y)).padStart(2)); rows.push(r.join(' ')) }
+    return rows
+  }
+
+  it('picks edge and corner tiles for a block', () => {
+    const map = setup('Block3x3')
+    for (let y = 0; y < 3; y++) for (let x = 0; x < 4; x++) map.setCellTerrain(x, y, 'Grass')
+    expect(grid(map, 0, 0, 3, 2)).toEqual([
+      ' 0  1  1  2',
+      ' 8  9  9 10',
+      '16 17 17 18',
+    ])
+    expect(map.terrainAt(1, 1)?.name).toBe('Grass')
+    // erasing a cell re-tiles its neighbours
+    map.setCellTerrain(1, 0, null)
+    expect(grid(map, 0, 0, 3, 1)).toEqual([
+      ' 0 -1  0  2',
+      ' 8  1  9 10',
+    ])
+  })
+
+  it('uses inner corners and the 16-tile cardinal layout', () => {
+    const map = setup()
+    // an L-shape: inner corner where the step meets the ground
+    for (let x = 0; x < 5; x++) for (let y = 2; y < 4; y++) map.setCellTerrain(x, y, 'Grass')
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) map.setCellTerrain(x, y, 'Grass')
+    expect(map.getCell(1, 2)).toBe(4) // inner top-right corner: where the step meets the ground
+    expect(map.getCell(0, 2)).toBe(8) // left edge below the step
+    expect(map.getCell(2, 2)).toBe(1) // ground top next to the wall
+    const c16 = setup('Cardinal16', Array.from({ length: 16 }, (_, i) => 100 + i).join(','))
+    c16.setCellTerrain(0, 0, 'Grass'); c16.setCellTerrain(1, 0, 'Grass'); c16.setCellTerrain(1, 1, 'Grass')
+    expect(c16.getCell(0, 0)).toBe(100 + 2) // right neighbour only
+    expect(c16.getCell(1, 0)).toBe(100 + 4 + 8) // down + left
+    expect(c16.getCell(1, 1)).toBe(100 + 1) // up only
   })
 })

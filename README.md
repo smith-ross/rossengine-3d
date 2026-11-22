@@ -126,11 +126,19 @@ Turn **World2D → Enabled** on (or start from **New 2D Place** / **2D Platforme
 | `Sprite2D` | An image, or a sprite-sheet frame (`HFrames`/`VFrames`/`Frame`). Supports tint, flip, pivot, pixel-art filtering, and `ScrollFactor` for parallax. |
 | `AnimatedSprite2D` + `SpriteAnimation` | Named animations (`Frames = "2-5"`, `FPS`, `Loop`). Use `Play(name)`, `Stop()`, and the `AnimationFinished`/`FrameChanged` events. |
 | `TileMap` | A tileset image plus painted cells. `SolidTiles` sets which tiles collide. Has `SetCell`, `GetCell`, `WorldToCell`, `CellToWorld` and `GetUsedCells`. |
+| `TileTerrain` | Auto-tiling rules, as a child of a TileMap. `Tiles` lists tileset indices in the order its `Mode` expects (below). Paint with `map:SetCellTerrain(x, y, "Ground")` (or `nil` to erase) and the cell and its neighbours pick the matching edge/corner tiles. `GetCellTerrain` and `UpdateTerrain` are also available. |
 | `CharacterBody2D` | Platformer movement: set `Velocity`, call `MoveAndSlide()`, then check `IsOnFloor()`/`IsOnWall()`/`IsOnCeiling()`. Gravity comes from `World2D.Gravity`. |
 | `RigidBody2D`, `StaticBody2D` | Physics bodies (Rapier 2D) with rectangle or circle shapes. Fire `Touched`/`TouchEnded`. |
 | `Area2D` | A trigger. Fires `BodyEntered`/`BodyExited`. |
 | `Camera2D` | Follows a target, with smoothing, zoom and offset. Has `ScreenToWorld`/`WorldToScreen`. |
 | `Text2D` | Text in the world, with an outline. |
+
+Terrain modes:
+- `Block3x3`: 9 tiles in this order: top-left, top, top-right, left, centre, right, bottom-left, bottom, bottom-right.
+- `Block3x3Inner`: the same 9, then 4 inner corners: top-left, top-right, bottom-left, bottom-right.
+- `Cardinal16`: 16 tiles indexed by neighbour bits (up = 1, right = 2, down = 4, left = 8).
+
+The Platformer template's ground is a `Block3x3Inner` terrain.
 
 ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting language work in 2D as well.
 
@@ -140,6 +148,7 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 - grid and collision-shape overlays can be toggled on;
 - sprite animations play live in the editor;
 - select a **TileMap** to paint with the tile palette: left click paints, right click erases, Shift+drag fills a rectangle;
+- **auto-tiling:** in the palette, click **+ Terrain** with the top-left tile of a block selected, then pick the terrain as the brush. Painting, erasing and rectangles then choose edge and corner tiles automatically. **Re-tile map** refreshes everything after you change a terrain's `Tiles`;
 - the Properties panel shows a sprite's sheet: click frames to set `Frame`, or to build a `SpriteAnimation`'s frame list, and **Fit size to frame**.
 
 ## Assets
@@ -147,7 +156,8 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 Sounds, images and 3D models are imported from files and saved inside the place file, so a game never needs an external ID or URL.
 
 - **Import:** drop files onto the viewport or the **Assets** panel, use **Import** or **Insert → Model** in the toolbar, or pick **Import file…** in any asset property.
-- **Formats:** models `.glb` `.gltf` (embedded buffers) `.obj` `.fbx` `.stl`; images `.png` `.jpg` `.webp` `.gif` `.svg`; audio `.mp3` `.ogg` `.wav` `.m4a`.
+- **Formats:** models `.glb` `.gltf` `.obj` `.fbx` `.stl`, including Draco- and Meshopt-compressed glTF and rigged/skinned meshes; images `.png` `.jpg` `.webp` `.gif` `.svg`; audio `.mp3` `.ogg` `.wav` `.m4a`.
+- **Multi-file models:** a `.gltf` with a separate `.bin` and textures, or an `.obj` with its `.mtl` and textures, needs all its files. Select them together, drop the folder's files, or import a `.zip` of the model. Missing files and load errors are reported in **Output**.
 - **Placing:** a model becomes a **MeshPart**, stretched to its `Size`. Set `CollisionFidelity` to `Hull` for a convex-hull collider. An image becomes a **Decal** on the face you drop it on. Audio becomes a **Sound**.
 - **From scripts:** asset properties hold `asset://<id>`, and scripts can use the asset's name instead, e.g. `sound.SoundId = "asset://Explosion"`.
 

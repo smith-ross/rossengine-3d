@@ -30,31 +30,57 @@ function noise(ctx: Ctx, x0: number, y0: number, colors: string[], seed: number)
   for (let i = 0; i < 26; i++) px(ctx, colors[Math.floor(r() * colors.length)], x0 + Math.floor(r() * 16), y0 + Math.floor(r() * 16))
 }
 
-/** 8 tiles (16px): 0 grass, 1 dirt, 2 stone, 3 plank, 4 crate, 5 spikes, 6 bush, 7 flower */
+/**
+ * Tileset (8 columns of 16px tiles):
+ *   0-2 / 8-10 / 16-18   ground terrain 3x3 block (grass top, dirt sides, bottom edge)
+ *   3, 4, 11, 12         ground inner corners (top-left, top-right, bottom-left, bottom-right)
+ *   5 stone, 6 plank, 7 crate, 13 spikes, 14 bush, 15 flower
+ */
+export const GROUND_TERRAIN_TILES = '0, 1, 2, 8, 9, 10, 16, 17, 18, 3, 4, 11, 12'
 function drawTileset(): HTMLCanvasElement {
-  const [c, ctx] = canvas(64, 32)
-  // 0 grass top
-  px(ctx, '#8a5a35', 0, 0, 16, 16); noise(ctx, 0, 4, ['#7a4c2c', '#9b6a42'], 1)
-  px(ctx, '#4caf50', 0, 0, 16, 5); px(ctx, '#7bd36b', 0, 0, 16, 2)
-  for (let x = 0; x < 16; x += 3) px(ctx, '#4caf50', x, 5, 2, 1)
-  // 1 dirt
-  px(ctx, '#8a5a35', 16, 0, 16, 16); noise(ctx, 16, 0, ['#7a4c2c', '#9b6a42', '#6d4325'], 2)
-  // 2 stone bricks
-  px(ctx, '#7d8597', 32, 0, 16, 16)
-  for (const [x, y, w] of [[32, 0, 7], [40, 0, 8], [32, 5, 3], [36, 5, 8], [45, 5, 3], [32, 10, 7], [40, 10, 8]]) { px(ctx, '#9aa3b5', x, y, w, 4); px(ctx, '#5f6677', x, y + 4, w, 1) }
-  // 3 wooden plank (one-way look)
-  px(ctx, '#a0682f', 48, 0, 16, 6); px(ctx, '#c4874a', 48, 0, 16, 2); px(ctx, '#6e451d', 48, 5, 16, 1)
-  for (const x of [52, 59]) px(ctx, '#6e451d', x, 1, 1, 4)
-  // 4 crate
-  px(ctx, '#b07a3a', 0, 16, 16, 16); px(ctx, '#6e451d', 0, 16, 16, 1); px(ctx, '#6e451d', 0, 31, 16, 1); px(ctx, '#6e451d', 0, 16, 1, 16); px(ctx, '#6e451d', 15, 16, 1, 16)
-  for (let k = 0; k < 14; k++) { px(ctx, '#6e451d', 1 + k, 17 + k); px(ctx, '#6e451d', 14 - k, 17 + k) }
-  // 5 spikes
-  for (let k = 0; k < 4; k++) for (let y = 0; y < 8; y++) px(ctx, y < 2 ? '#e8eef6' : '#b7c0cf', 16 + k * 4 + Math.floor(y / 2.7), 24 + y - 0, Math.max(1, 4 - Math.floor(y / 2.7) * 2), 1)
-  // 6 bush
-  for (const [x, y, r] of [[37, 26, 5], [43, 25, 6], [40, 22, 5]]) { ctx.fillStyle = '#3f9b48'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() }
-  px(ctx, '#62c46b', 38, 21, 3, 1); px(ctx, '#62c46b', 43, 21, 3, 1)
-  // 7 flower
-  px(ctx, '#3f9b48', 55, 24, 1, 8); px(ctx, '#ff6b9a', 53, 21, 5, 3); px(ctx, '#ffd84a', 55, 22)
+  const [c, ctx] = canvas(128, 48)
+  const T = (i: number) => [(i % 8) * 16, Math.floor(i / 8) * 16] as const
+  const dirt = (i: number, seed: number) => { const [x, y] = T(i); px(ctx, '#8a5a35', x, y, 16, 16); noise(ctx, x, y, ['#7a4c2c', '#9b6a42', '#6d4325'], seed) }
+  const grassTop = (i: number) => { const [x, y] = T(i); px(ctx, '#4caf50', x, y, 16, 5); px(ctx, '#7bd36b', x, y, 16, 2); for (let k = 0; k < 16; k += 3) px(ctx, '#4caf50', x + k, y + 5, 2, 1) }
+  const edge = (i: number, side: 'l' | 'r' | 'b', grass = false) => {
+    const [x, y] = T(i)
+    const col = grass ? '#3f9b48' : '#5c3a21'
+    if (side === 'l') px(ctx, col, x, y, 2, 16)
+    if (side === 'r') px(ctx, col, x + 14, y, 2, 16)
+    if (side === 'b') px(ctx, '#5c3a21', x, y + 14, 16, 2)
+  }
+  const cut = (i: number, corner: 'tl' | 'tr' | 'bl' | 'br') => {
+    const [x, y] = T(i)
+    const cx = corner.endsWith('l') ? x : x + 14, cy = corner.startsWith('t') ? y : y + 14
+    ctx.clearRect(cx, cy, 2, 2)
+  }
+  // 3x3 ground block
+  for (const [i, seed] of [[0, 1], [1, 2], [2, 3], [8, 4], [9, 5], [10, 6], [16, 7], [17, 8], [18, 9]]) dirt(i, seed)
+  for (const i of [0, 1, 2]) grassTop(i)
+  edge(0, 'l', true); edge(8, 'l'); edge(16, 'l')
+  edge(2, 'r', true); edge(10, 'r'); edge(18, 'r')
+  edge(16, 'b'); edge(17, 'b'); edge(18, 'b')
+  cut(0, 'tl'); cut(2, 'tr'); cut(16, 'bl'); cut(18, 'br')
+  // inner corners: dirt with a notch of grass/edge in one corner
+  for (const [i, seed] of [[3, 10], [4, 11], [11, 12], [12, 13]]) dirt(i, seed)
+  { const [x, y] = T(3); px(ctx, '#4caf50', x, y, 3, 3); px(ctx, '#7bd36b', x, y, 2, 1) }
+  { const [x, y] = T(4); px(ctx, '#4caf50', x + 13, y, 3, 3); px(ctx, '#7bd36b', x + 14, y, 2, 1) }
+  { const [x, y] = T(11); px(ctx, '#5c3a21', x, y + 13, 3, 3) }
+  { const [x, y] = T(12); px(ctx, '#5c3a21', x + 13, y + 13, 3, 3) }
+  // 5 stone bricks
+  { const [x0, y0] = T(5); px(ctx, '#7d8597', x0, y0, 16, 16)
+    for (const [x, y, w] of [[0, 0, 7], [8, 0, 8], [0, 5, 3], [4, 5, 8], [13, 5, 3], [0, 10, 7], [8, 10, 8]]) { px(ctx, '#9aa3b5', x0 + x, y0 + y, w, 4); px(ctx, '#5f6677', x0 + x, y0 + y + 4, w, 1) } }
+  // 6 wooden plank
+  { const [x, y] = T(6); px(ctx, '#a0682f', x, y, 16, 6); px(ctx, '#c4874a', x, y, 16, 2); px(ctx, '#6e451d', x, y + 5, 16, 1); for (const k of [4, 11]) px(ctx, '#6e451d', x + k, y + 1, 1, 4) }
+  // 7 crate
+  { const [x, y] = T(7); px(ctx, '#b07a3a', x, y, 16, 16); px(ctx, '#6e451d', x, y, 16, 1); px(ctx, '#6e451d', x, y + 15, 16, 1); px(ctx, '#6e451d', x, y, 1, 16); px(ctx, '#6e451d', x + 15, y, 1, 16)
+    for (let k = 0; k < 14; k++) { px(ctx, '#6e451d', x + 1 + k, y + 1 + k); px(ctx, '#6e451d', x + 14 - k, y + 1 + k) } }
+  // 13 spikes
+  { const [x, y] = T(13); for (let k = 0; k < 4; k++) for (let r = 0; r < 8; r++) { const w = Math.max(1, 4 - Math.floor(r / 2)); px(ctx, r < 2 ? '#e8eef6' : '#b7c0cf', x + k * 4 + Math.floor((4 - w) / 2), y + 8 + r - 0, w, 1) } }
+  // 14 bush
+  { const [x, y] = T(14); for (const [dx, dy, r] of [[5, 10, 5], [11, 9, 6], [8, 6, 5]]) { ctx.fillStyle = '#3f9b48'; ctx.beginPath(); ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2); ctx.fill() } px(ctx, '#62c46b', x + 6, y + 5, 3, 1); px(ctx, '#62c46b', x + 11, y + 5, 3, 1) }
+  // 15 flower
+  { const [x, y] = T(15); px(ctx, '#3f9b48', x + 7, y + 8, 1, 8); px(ctx, '#ff6b9a', x + 5, y + 5, 5, 3); px(ctx, '#ffd84a', x + 7, y + 6) }
   return c
 }
 
@@ -194,6 +220,7 @@ update()
 `
 
 // ---- level ------------------------------------------------------------------------------------------
+// G = ground terrain (auto-tiled), # stone, = plank, S crate, ^ spikes, b bush, f flower, o coin
 const LEVEL = [
   '                                                                    ',
   '                                                     o o o          ',
@@ -206,8 +233,9 @@ const LEVEL = [
   'GGGGGGGGGGGGGGGGGGGGGGGGGG    GGGGGGGGGGGGGGGGG   GGGGGGGGGGGGGGGGGGG',
   'DDDDDDDDDDDDDDDDDDDDDDDDDD    DDDDDDDDDDDDDDDDD   DDDDDDDDDDDDDDDDDDD',
   'DDDDDDDDDDDDDDDDDDDDDDDDDD^^^^DDDDDDDDDDDDDDDDD^^^DDDDDDDDDDDDDDDDDDD',
+  'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD',
 ]
-const TILE: Record<string, number> = { G: 0, D: 1, '#': 2, '=': 3, S: 4, '^': 5, b: 6, f: 7 }
+const TILE: Record<string, number> = { '#': 5, '=': 6, S: 7, '^': 13, b: 14, f: 15 }
 
 export async function platformerPlace(): Promise<DataModel> {
   const game = baseplatePlace()
@@ -230,9 +258,14 @@ export async function platformerPlace(): Promise<DataModel> {
     }, w2d)
   }
 
-  // tilemap ('#', 'G', 'D', '=', 'S' are solid; decorations and spikes are not)
-  const map = make('TileMap', { Name: 'Level', TileSet: contentRef(tiles), TileSize: new Vector2(16, 16), SolidTiles: '0-4' }, w2d) as TileMap
-  LEVEL.forEach((row, y) => [...row].forEach((ch, x) => { if (ch in TILE) map.setCell(x - 4, y - 8, TILE[ch]) }))
+  // tilemap: ground is an auto-tiled terrain; stone, planks and crates are solid too, decorations aren't
+  const map = make('TileMap', { Name: 'Level', TileSet: contentRef(tiles), TileSize: new Vector2(16, 16), SolidTiles: '0-12, 16-18' }, w2d) as TileMap
+  make('TileTerrain', { Name: 'Ground', Mode: enumItem('TerrainMode', 'Block3x3Inner'), Tiles: GROUND_TERRAIN_TILES }, map)
+  LEVEL.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === 'G' || ch === 'D') map.setCellTerrain(x - 4, y - 8, 'Ground', false)
+    else if (ch in TILE) map.setCell(x - 4, y - 8, TILE[ch], false)
+  }))
+  map.changed('Cells')
 
   // coins
   const coins = make('Folder', { Name: 'Coins' }, w2d)
@@ -283,7 +316,7 @@ export function empty2DPlace(): DataModel {
   const cam = make('Camera2D', { Name: 'Camera', Zoom: 2 }, w2d)
   w2d.set('CurrentCamera', cam)
   const map = make('TileMap', { Name: 'TileMap' }, w2d) as TileMap
-  for (let x = -12; x <= 12; x++) map.setCell(x, 4, 0)
+  for (let x = -12; x <= 12; x++) map.setCell(x, 4, 0, false)
   game.workspace.findFirstChild('Baseplate')?.destroy()
   game.workspace.findFirstChild('SpawnLocation')?.destroy()
   return game
