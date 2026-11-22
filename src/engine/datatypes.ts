@@ -1,6 +1,7 @@
-// Engine-side (TypeScript) value types. The Luau side has its own pure-Luau
-// implementations of these (see luau/prelude.luau); values are marshalled
-// across the bridge as flat number lists.
+// Engine value types. The same objects are exposed to TypeScript and Python scripts, so besides
+// the engine's own lowercase members they carry the Roblox-style API (X, Magnitude, Vector3.new,
+// CFrame.Angles, ...). JS and Python have no operator overloading, so arithmetic is .add/.sub/.mul/.div.
+// The Luau side has its own pure-Luau implementations (see luau/prelude.luau).
 import * as THREE from 'three'
 
 export class Vector3 {
@@ -9,8 +10,31 @@ export class Vector3 {
   static readonly one = new Vector3(1, 1, 1)
   add(o: Vector3) { return new Vector3(this.x + o.x, this.y + o.y, this.z + o.z) }
   sub(o: Vector3) { return new Vector3(this.x - o.x, this.y - o.y, this.z - o.z) }
-  mul(s: number) { return new Vector3(this.x * s, this.y * s, this.z * s) }
+  mul(s: number | Vector3) {
+    return typeof s === 'number' ? new Vector3(this.x * s, this.y * s, this.z * s) : new Vector3(this.x * s.x, this.y * s.y, this.z * s.z)
+  }
+  div(s: number | Vector3) {
+    return typeof s === 'number' ? new Vector3(this.x / s, this.y / s, this.z / s) : new Vector3(this.x / s.x, this.y / s.y, this.z / s.z)
+  }
   get magnitude() { return Math.hypot(this.x, this.y, this.z) }
+  // Roblox API
+  static new(x = 0, y = 0, z = 0) { return new Vector3(x, y, z) }
+  static readonly xAxis = new Vector3(1, 0, 0)
+  static readonly yAxis = new Vector3(0, 1, 0)
+  static readonly zAxis = new Vector3(0, 0, 1)
+  get X() { return this.x }
+  get Y() { return this.y }
+  get Z() { return this.z }
+  get Magnitude() { return this.magnitude }
+  get Unit(): Vector3 { return this.magnitude === 0 ? this : this.unit }
+  Dot(o: Vector3) { return this.dot(o) }
+  Cross(o: Vector3) { return this.cross(o) }
+  Lerp(o: Vector3, t: number) { return this.add(o.sub(this).mul(t)) }
+  FuzzyEq(o: Vector3, eps = 1e-5) { return this.sub(o).magnitude <= eps }
+  Abs() { return new Vector3(Math.abs(this.x), Math.abs(this.y), Math.abs(this.z)) }
+  Floor() { return new Vector3(Math.floor(this.x), Math.floor(this.y), Math.floor(this.z)) }
+  Ceil() { return new Vector3(Math.ceil(this.x), Math.ceil(this.y), Math.ceil(this.z)) }
+  unm() { return new Vector3(-this.x, -this.y, -this.z) }
   get unit() { const m = this.magnitude || 1; return this.mul(1 / m) }
   dot(o: Vector3) { return this.x * o.x + this.y * o.y + this.z * o.z }
   cross(o: Vector3) {
@@ -32,6 +56,52 @@ export class CFrame {
   ) {}
   static readonly identity = new CFrame()
   static fromPosition(p: Vector3) { return new CFrame(p.x, p.y, p.z) }
+  // Roblox API ---------------------------------------------------------------
+  /** CFrame.new(), (x,y,z), (pos), (pos, lookAt), (x,y,z,qx,qy,qz,qw) or 12 components */
+  static new(...a: any[]): CFrame {
+    if (a.length === 0) return CFrame.identity
+    if (a[0] instanceof Vector3) return a[1] instanceof Vector3 ? CFrame.lookAt(a[0], a[1]) : CFrame.fromPosition(a[0])
+    if (a.length === 7) return CFrame.fromPositionQuaternion({ x: a[0], y: a[1], z: a[2] }, { x: a[3], y: a[4], z: a[5], w: a[6] })
+    if (a.length === 12) return CFrame.fromComponents(a)
+    return new CFrame(a[0] ?? 0, a[1] ?? 0, a[2] ?? 0)
+  }
+  static Angles(rx = 0, ry = 0, rz = 0) { return CFrame.fromEuler(rx, ry, rz, 'XYZ') }
+  static fromEulerAnglesXYZ(rx = 0, ry = 0, rz = 0) { return CFrame.fromEuler(rx, ry, rz, 'XYZ') }
+  static fromEulerAnglesYXZ(rx = 0, ry = 0, rz = 0) { return CFrame.fromEuler(rx, ry, rz, 'YXZ') }
+  static fromAxisAngle(axis: Vector3, angle: number) {
+    const q = new THREE.Quaternion().setFromAxisAngle(axis.unit.toThree(), angle)
+    return CFrame.fromPositionQuaternion({ x: 0, y: 0, z: 0 }, q)
+  }
+  private static fromEuler(rx: number, ry: number, rz: number, order: 'XYZ' | 'YXZ') {
+    return CFrame.fromMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, rz, order)))
+  }
+  get Position() { return this.position }
+  get X() { return this.x }
+  get Y() { return this.y }
+  get Z() { return this.z }
+  get LookVector() { return this.lookVector }
+  get RightVector() { return this.rightVector }
+  get UpVector() { return this.upVector }
+  get Rotation() { return this.rotationOnly() }
+  Inverse() { return this.inverse() }
+  /** cf.mul(otherCFrame) -> CFrame, cf.mul(vector) -> Vector3 (like cf * x in Luau) */
+  Mul(o: CFrame | Vector3): CFrame | Vector3 { return o instanceof Vector3 ? this.pointToWorld(o) : this.mul(o) }
+  add(v: Vector3) { return this.withPosition(this.position.add(v)) }
+  sub(v: Vector3) { return this.withPosition(this.position.sub(v)) }
+  ToWorldSpace(o: CFrame) { return this.mul(o) }
+  ToObjectSpace(o: CFrame) { return this.inverse().mul(o) }
+  PointToWorldSpace(v: Vector3) { return this.pointToWorld(v) }
+  PointToObjectSpace(v: Vector3) { return this.inverse().pointToWorld(v) }
+  VectorToWorldSpace(v: Vector3) { return this.vectorToWorld(v) }
+  VectorToObjectSpace(v: Vector3) { return this.inverse().vectorToWorld(v) }
+  Lerp(o: CFrame, t: number) {
+    const q = this.toQuaternion().slerp(o.toQuaternion(), t)
+    const p = this.position.Lerp(o.position, t)
+    return CFrame.fromPositionQuaternion(p, q)
+  }
+  GetComponents() { return this.components() }
+  ToEulerAnglesXYZ() { const e = new THREE.Euler().setFromRotationMatrix(this.toMatrix4(), 'XYZ'); return [e.x, e.y, e.z] }
+  ToEulerAnglesYXZ() { const e = new THREE.Euler().setFromRotationMatrix(this.toMatrix4(), 'YXZ'); return [e.x, e.y, e.z] }
   get position() { return new Vector3(this.x, this.y, this.z) }
   components(): number[] {
     return [this.x, this.y, this.z, this.r00, this.r01, this.r02, this.r10, this.r11, this.r12, this.r20, this.r21, this.r22]
@@ -129,6 +199,17 @@ export class CFrame {
 export class Color3 {
   constructor(public readonly r = 0, public readonly g = 0, public readonly b = 0) {}
   static fromRGB(r: number, g: number, b: number) { return new Color3(r / 255, g / 255, b / 255) }
+  static new(r = 0, g = 0, b = 0) { return new Color3(r, g, b) }
+  static fromHSV(h: number, s: number, v: number) {
+    const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s)
+    const [r, g, b] = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][((i % 6) + 6) % 6]
+    return new Color3(r, g, b)
+  }
+  get R() { return this.r }
+  get G() { return this.g }
+  get B() { return this.b }
+  Lerp(o: Color3, t: number) { return new Color3(this.r + (o.r - this.r) * t, this.g + (o.g - this.g) * t, this.b + (o.b - this.b) * t) }
+  ToHex() { return this.toHex().slice(1).toUpperCase() }
   static fromHex(hex: string) {
     const h = hex.replace('#', '')
     const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16)
@@ -145,11 +226,21 @@ export class Color3 {
 export class Vector2 {
   constructor(public readonly x = 0, public readonly y = 0) {}
   static readonly zero = new Vector2(0, 0)
+  static new(x = 0, y = 0) { return new Vector2(x, y) }
+  get X() { return this.x }
+  get Y() { return this.y }
+  get Magnitude() { return Math.hypot(this.x, this.y) }
+  add(o: Vector2) { return new Vector2(this.x + o.x, this.y + o.y) }
+  sub(o: Vector2) { return new Vector2(this.x - o.x, this.y - o.y) }
+  mul(s: number | Vector2) { return typeof s === 'number' ? new Vector2(this.x * s, this.y * s) : new Vector2(this.x * s.x, this.y * s.y) }
   toString() { return `${fmt(this.x)}, ${fmt(this.y)}` }
 }
 
 export class UDim {
   constructor(public readonly scale = 0, public readonly offset = 0) {}
+  static new(scale = 0, offset = 0) { return new UDim(scale, offset) }
+  get Scale() { return this.scale }
+  get Offset() { return this.offset }
   toString() { return `${fmt(this.scale)}, ${fmt(this.offset)}` }
 }
 
@@ -158,11 +249,21 @@ export class UDim2 {
     public readonly xs = 0, public readonly xo = 0,
     public readonly ys = 0, public readonly yo = 0,
   ) {}
+  static new(xs = 0, xo = 0, ys = 0, yo = 0) { return new UDim2(xs, xo, ys, yo) }
+  static fromScale(x = 0, y = 0) { return new UDim2(x, 0, y, 0) }
+  static fromOffset(x = 0, y = 0) { return new UDim2(0, x, 0, y) }
+  get X() { return new UDim(this.xs, this.xo) }
+  get Y() { return new UDim(this.ys, this.yo) }
+  add(o: UDim2) { return new UDim2(this.xs + o.xs, this.xo + o.xo, this.ys + o.ys, this.yo + o.yo) }
+  Lerp(o: UDim2, t: number) { return new UDim2(this.xs + (o.xs - this.xs) * t, this.xo + (o.xo - this.xo) * t, this.ys + (o.ys - this.ys) * t, this.yo + (o.yo - this.yo) * t) }
   toString() { return `{${fmt(this.xs)}, ${fmt(this.xo)}}, {${fmt(this.ys)}, ${fmt(this.yo)}}` }
 }
 
 export class EnumItem {
   constructor(public readonly enumType: string, public readonly name: string, public readonly value: number) {}
+  get Name() { return this.name }
+  get Value() { return this.value }
+  get EnumType() { return this.enumType }
   toString() { return `Enum.${this.enumType}.${this.name}` }
 }
 
@@ -185,6 +286,7 @@ export const Enums: Record<string, string[]> = {
   Font: ['SourceSans', 'SourceSansBold', 'Gotham', 'GothamBold', 'Arial', 'ArialBold', 'Code', 'Cartoon'],
   CameraType: ['Custom', 'Scriptable', 'Fixed'],
   FillDirection: ['Horizontal', 'Vertical'],
+  ScriptLanguage: ['Luau', 'TypeScript', 'Python'],
   CollisionFidelity: ['Box', 'Hull'],
   RaycastFilterType: ['Exclude', 'Include', 'Blacklist', 'Whitelist'],
   NormalId: ['Top', 'Bottom', 'Front', 'Back', 'Left', 'Right'],

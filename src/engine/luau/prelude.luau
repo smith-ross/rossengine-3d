@@ -16,6 +16,7 @@ local cresume, crunning, cyield, ccreate, cstatus = coroutine.resume, coroutine.
 
 local G = {} -- the global environment that user scripts see (frozen at the end)
 local idOf = setmetatable({}, { __mode = "k" }) -- Instance proxy -> id
+local jsRefOf = setmetatable({}, { __mode = "k" }) -- foreign (JS/Python) value proxy -> ref id
 
 ------------------------------------------------------------------------------
 -- typeof
@@ -27,6 +28,8 @@ local function typeof(v)
 	elseif t == "userdata" then
 		if idOf[v] then
 			return "Instance"
+		elseif jsRefOf[v] then
+			return "Foreign"
 		end
 	elseif t == "table" then
 		local mt = getmetatable(v)
@@ -1126,6 +1129,12 @@ local function enc(buf, n, v)
 			buf[n + 2] = id
 			return n + 2
 		end
+		local ref = jsRefOf[v]
+		if ref then
+			buf[n + 1] = 13
+			buf[n + 2] = ref
+			return n + 2
+		end
 		buf[n + 1] = 1
 		buf[n + 2] = tostring(v)
 		return n + 2
@@ -1177,11 +1186,9 @@ local function enc(buf, n, v)
 		n = n + 2
 		local count = 0
 		for key, val in pairs(v) do
-			if type(val) ~= "function" then
-				count += 1
-				n = enc(buf, n, key)
-				n = enc(buf, n, val)
-			end
+			count += 1
+			n = enc(buf, n, key)
+			n = enc(buf, n, val)
 		end
 		buf[countIdx] = count
 		return n
@@ -1202,6 +1209,7 @@ local function encAll(...)
 end
 
 -- decoding ------------------------------------------------------------------
+local jsProxy -- forward
 local decodeAt
 decodeAt = function(a, i)
 	local tag = a[i]
@@ -1238,6 +1246,8 @@ decodeAt = function(a, i)
 		return t, i
 	elseif tag == 12 then
 		return a[i + 1], i + 2
+	elseif tag == 13 then
+		return jsProxy(a[i + 1]), i + 2
 	end
 	error("bad bridge value tag " .. tostring(tag))
 end
@@ -1470,11 +1480,6 @@ G.Instance = freeze({
 	end,
 })
 
-defineLua("BindableEvent", {
-	Fire = function(self, ...)
-		signalFor(idOf[self], "Event")._fire(signalFor(idOf[self], "Event"), ...)
-	end,
-})
 defineLuaProps("BindableFunction", { "OnInvoke" })
 defineLua("BindableFunction", {
 	Invoke = function(self, ...)
@@ -1512,9 +1517,69 @@ defineLua("ContextActionService", {
 ------------------------------------------------------------------------------
 -- require
 ------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+-- Foreign values (TypeScript / Python objects and functions) seen from Luau
+------------------------------------------------------------------------------
+local jsProxies = setmetatable({}, { __mode = "v" })
+jsProxy = function(ref)
+	local p = jsProxies[ref]
+	if p then
+		return p
+	end
+	p = newproxy(true)
+	local mt = getmetatable(p)
+	mt.__index = function(_, k)
+		local buf, n = encAll(k)
+		return decode1(hostCall(H.jsget, ref, tunpack(buf, 1, n)))
+	end
+	mt.__newindex = function(_, k, v)
+		local buf, n = encAll(k, v)
+		hostCall(H.jsset, ref, tunpack(buf, 1, n))
+	end
+	mt.__call = function(_, ...)
+		local buf, n = encAll(...)
+		return decodeAll(hostCall(H.jscall, ref, tunpack(buf, 1, n)))
+	end
+	mt.__len = function()
+		return H.jslen(ref)
+	end
+	mt.__tostring = function()
+		return H.jsstr(ref)
+	end
+	mt.__iter = function(self)
+		local keys = H.jskeys(ref)
+		local i = 0
+		return function()
+			i += 1
+			local k = keys[i]
+			if k == nil then
+				return nil
+			end
+			return k, self[k]
+		end
+	end
+	mt.__type = "Foreign"
+	jsProxies[ref] = p
+	jsRefOf[p] = ref
+	return p
+end
+
 local moduleCache = {}
-local function require_(m)
+local function require_(m, fromScriptId)
+	if type(m) == "string" then
+		m = decode1(hostCall(H.resolve, fromScriptId or 0, m))
+	end
 	local id = idOf[m]
+	if id and classOf[id] == "ModuleScript" and H.isForeign(id) then
+		-- TypeScript / Python module: loaded by the host, returned as a live proxy
+		local c = moduleCache[id]
+		if c then
+			return c.value
+		end
+		local v = decode1(hostCall(H.requireForeign, id))
+		moduleCache[id] = { value = v }
+		return v
+	end
 	if not id or classOf[id] ~= "ModuleScript" then
 		error("Attempted to call require with invalid argument(s).", 2)
 	end
@@ -1624,6 +1689,9 @@ local internals = {}
 function internals.makeEnv(id, cls)
 	local env = setmetatable({}, { __index = G })
 	env.script = wrap(id, cls)
+	env.require = function(m)
+		return require_(m, id)
+	end
 	return env
 end
 
@@ -1687,6 +1755,48 @@ function internals.action(keyName, state, inputId, inputCls)
 			end
 		end
 	end
+end
+
+-- Live encoding: plain tables and functions go by reference (tag 12) so other languages
+-- see the real table/function, not a copy.
+local function encLive(buf, n, v)
+	local t = rawtypeof(v)
+	if (t == "table" and not kindOf(v)) or t == "function" or t == "thread" then
+		buf[n + 1] = 12
+		buf[n + 2] = v
+		return n + 2
+	end
+	return enc(buf, n, v)
+end
+local function encLiveAll(...)
+	local buf, n = {}, 0
+	for i = 1, select("#", ...) do
+		n = encLive(buf, n, (select(i, ...)))
+	end
+	return tunpack(buf, 1, n)
+end
+function internals.getLive(t, ...)
+	return encLiveAll(t[decode1(...)])
+end
+function internals.setLive(t, ...)
+	local k, v = decodeAll(...)
+	t[k] = v
+end
+function internals.keysLive(t)
+	local out = {}
+	for k in pairs(t) do
+		local kt = type(k)
+		if kt == "string" or kt == "number" then
+			table.insert(out, k)
+		end
+	end
+	return tunpack(out)
+end
+function internals.callLive(fn, ...)
+	return encLiveAll(fn(decodeAll(...)))
+end
+function internals.requireLive(id, cls)
+	return encLiveAll(require_(wrap(id, cls)))
 end
 
 function internals.forget(id)

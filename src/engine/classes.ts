@@ -439,7 +439,10 @@ defineClass(Sound, {
 export class LuaSourceContainer extends Instance {}
 defineClass(LuaSourceContainer, {
   name: 'LuaSourceContainer', superclass: 'Instance', creatable: false,
-  props: { Source: { type: 'string', hidden: true } },
+  props: {
+    Source: { type: 'string', hidden: true },
+    Language: { type: 'Enum.ScriptLanguage', default: () => enumItem('ScriptLanguage', 'Luau'), category: 'Behavior' },
+  },
 })
 export class BaseScript extends LuaSourceContainer {}
 defineClass(BaseScript, {
@@ -483,7 +486,11 @@ for (const [name, events] of [
 ] as const) {
   class C extends Instance {}
   Object.defineProperty(C, 'name', { value: name })
-  defineClass(C, { name, superclass: 'Instance', category: 'Communication', events: [...events] })
+  defineClass(C, {
+    name, superclass: 'Instance', category: 'Communication', events: [...events],
+    // Fire goes through the engine, so listeners in every language (Luau, TypeScript, Python) receive it
+    methods: name === 'BindableEvent' ? { Fire: (self: Instance, ...args: unknown[]) => { self.fire('Event', ...args) } } : {},
+  })
 }
 
 class ClickDetector extends Instance {}

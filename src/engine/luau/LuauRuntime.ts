@@ -4,6 +4,7 @@ import preludeSource from './prelude.luau?raw'
 import { CFrame, Color3, EnumItem, Enums, UDim, UDim2, Vector2, Vector3, enumItem } from '../datatypes'
 import { Instance, PropDef, addEventSink, createInstance, getClass, isA } from '../instance'
 import { DataModel, Multi, TweenInfoData } from '../classes'
+import { languageOf, resolveModule } from '../scripting/languages'
 
 export type OutputKind = 'info' | 'warn' | 'error'
 export interface OutputSink {
@@ -31,6 +32,21 @@ export class LuauRuntime {
   private disposeObserver: () => void
   destroyed = false
   private startTime = performance.now()
+  /** cross-language hooks, installed by ScriptHost */
+  foreignRequire: ((inst: Instance) => unknown) | null = null
+  unwrapApi: ((v: unknown) => Instance | null) | null = null
+  // JS values referenced from Luau (tag 13)
+  private jsRefs = new Map<number, unknown>()
+  private jsRefIds = new Map<unknown, number>()
+  private jsOwners = new Map<number, unknown>()
+  private nextJsRef = 1
+  // Luau values wrapped for JS
+  private luaOf = new WeakMap<object, LuaTable | LuaFunction>()
+  private fnGetLive!: LuaFunction
+  private fnSetLive!: LuaFunction
+  private fnKeysLive!: LuaFunction
+  private fnCallLive!: LuaFunction
+  private fnRequireLive!: LuaFunction
 
   private constructor(readonly lua: Lua, readonly game: DataModel, readonly output: OutputSink) {
     this.disposeSink = addEventSink((inst, event, args) => this.onEngineEvent(inst, event, args))
@@ -87,6 +103,52 @@ export class LuauRuntime {
       this.output('error', clean + (tb ? '\n' + cleanTraceback(tb) : ''), s?.getFullName())
     })
     fn('print', (kind: number, msg: string) => this.output(kind === 1 ? 'warn' : 'info', msg))
+    // ---- cross-language: foreign (TypeScript/Python) modules and JS values inside Luau
+    fn('isForeign', (id: number) => languageOf(this.inst(id)) !== 'Luau')
+    fn('requireForeign', (id: number) => {
+      if (!this.foreignRequire) throw new Error('Cross-language require is not available')
+      return this.retLive([this.foreignRequire(this.inst(id))])
+    })
+    fn('resolve', (scriptId: number, spec: string) => {
+      const from = this.byId.get(scriptId) ?? null
+      const m = resolveModule(String(spec), from, '/')
+      if (!m) throw new Error(`Module "${spec}" was not found`)
+      return this.ret([m])
+    })
+    fn('jsget', (ref: number, ...flat: unknown[]) => {
+      const obj = this.jsRefs.get(ref) as any
+      let key = this.decodeFirst(flat) as any
+      if (Array.isArray(obj) && typeof key === 'number') key = key - 1
+      let v = obj?.[key]
+      if (typeof v === 'function' && !isForeignProxy(v)) v = v.bind(obj)
+      const out = this.retLive([v])
+      if (typeof v === 'function') this.jsOwners.set(this.jsRefIds.get(v)!, obj)
+      return out
+    })
+    fn('jsset', (ref: number, ...flat: unknown[]) => {
+      const obj = this.jsRefs.get(ref) as any
+      const [k, v] = this.decodeAll(flat)
+      obj[Array.isArray(obj) && typeof k === 'number' ? k - 1 : (k as any)] = plainify(v)
+    })
+    fn('jscall', (ref: number, ...flat: unknown[]) => {
+      const f = this.jsRefs.get(ref) as any
+      let args = this.decodeAll(flat).map(plainify)
+      // obj:method(...) passes the object as `self`; JS/Python functions don't expect it
+      if (args.length && this.jsOwners.has(ref) && args[0] === this.jsOwners.get(ref)) args = args.slice(1)
+      if (typeof f !== 'function') throw new Error('attempt to call a non-function foreign value')
+      return this.retLive([f(...args)])
+    })
+    fn('jskeys', (ref: number) => {
+      const obj = this.jsRefs.get(ref) as any
+      if (Array.isArray(obj)) return this.lua.createTable(obj.map((_: unknown, i: number) => i + 1))
+      const keys = obj instanceof Map ? [...obj.keys()] : isForeignProxy(obj) && typeof obj.keys === 'function' ? [...obj.keys()] : Object.keys(obj ?? {})
+      return this.lua.createTable(keys.map(String))
+    })
+    fn('jslen', (ref: number) => {
+      const obj = this.jsRefs.get(ref) as any
+      return Number(obj?.length ?? obj?.size ?? 0)
+    })
+    fn('jsstr', (ref: number) => String(this.jsRefs.get(ref)))
     fn('clock', () => Date.now() / 1000)
 
     // Interrupt long-running code (infinite loops without yields).
@@ -111,6 +173,107 @@ export class LuauRuntime {
     this.fnRevive = internals.get('reviveScript') as LuaFunction
     this.fnRenderStep = internals.get('renderStep') as LuaFunction
     this.fnAction = internals.get('action') as LuaFunction
+    this.fnGetLive = internals.get('getLive') as LuaFunction
+    this.fnSetLive = internals.get('setLive') as LuaFunction
+    this.fnKeysLive = internals.get('keysLive') as LuaFunction
+    this.fnCallLive = internals.get('callLive') as LuaFunction
+    this.fnRequireLive = internals.get('requireLive') as LuaFunction
+  }
+
+  // ---------------------------------------------------------------- cross-language (live values)
+  /** Call into Luau from JS code (another language), keeping the timeout and propagating errors. */
+  private callIn<T>(f: () => T): T {
+    const outer = this.depth === 0
+    if (outer) this.entryStart = performance.now()
+    this.depth++
+    try {
+      return f()
+    } catch (e) {
+      throw new Error(String((e as Error)?.message ?? e).split('\nstack traceback:')[0].replace(/^runtime error: /, ''))
+    } finally {
+      this.depth--
+      if (outer) this.flush()
+    }
+  }
+
+  /** require() a Luau ModuleScript from another language; returns a live JS view of its result. */
+  requireLive(inst: Instance): unknown {
+    this.register(inst)
+    return this.callIn(() => this.decodeLive(this.fnRequireLive.call(inst.id, inst.className) as unknown[]))[0]
+  }
+
+  private retLive(values: unknown[]) {
+    return intoLua.multiple(...(this.encodeLive(values) as any[]))
+  }
+
+  /** Encode for Luau, passing non-engine JS objects/functions by reference (tag 13). */
+  encodeLive(values: unknown[]): unknown[] {
+    const out: unknown[] = []
+    for (const raw of values) {
+      const v = this.unwrapApi?.(raw) ?? raw
+      const lv = v && (typeof v === 'object' || typeof v === 'function') ? this.luaOf.get(v as object) : undefined
+      if (lv) { out.push(12, lv); continue }
+      if (v === null || v === undefined || typeof v !== 'object' && typeof v !== 'function' || isEngineValue(v)) {
+        this.encode(v, out)
+        continue
+      }
+      let id = this.jsRefIds.get(v)
+      if (!id) { id = this.nextJsRef++; this.jsRefIds.set(v, id); this.jsRefs.set(id, v) }
+      out.push(13, id)
+    }
+    return out
+  }
+
+  /** Decode values coming from Luau where tables/functions are passed live (tag 12). */
+  decodeLive(flat: unknown[]): unknown[] {
+    return this.decodeAll(flat)
+  }
+
+  private wrapLuaFunction(fn: LuaFunction): (...args: unknown[]) => unknown {
+    const w = (...args: unknown[]) => {
+      const r = this.callIn(() => this.fnCallLive.call(fn, ...(this.encodeLive(args) as any[])) as unknown[])
+      const vals = this.decodeLive(r)
+      return vals.length <= 1 ? vals[0] : vals
+    }
+    this.luaOf.set(w, fn)
+    return w
+  }
+
+  private wrapLuaTable(t: LuaTable): object {
+    const rt = this
+    const key = (k: string | symbol) => (typeof k === 'string' && /^-?\d+(\.\d+)?$/.test(k) ? Number(k) : k)
+    const p = new Proxy({}, {
+      get(_o, k) {
+        if (typeof k === 'symbol') {
+          if (k === Symbol.iterator) return function* () { for (const kk of rt.tableKeys(t)) yield rt.tableGet(t, kk) }
+          return undefined
+        }
+        if (k === 'then' || k === 'toJSON') return undefined
+        return rt.tableGet(t, key(k))
+      },
+      set(_o, k, v) {
+        if (typeof k === 'symbol') return false
+        rt.callIn(() => rt.fnSetLive.call(t, ...(rt.encodeLive([key(k), v]) as any[])))
+        return true
+      },
+      has(_o, k) { return typeof k === 'string' && rt.tableGet(t, key(k)) !== null },
+      ownKeys() { return rt.tableKeys(t).map(String) },
+      getOwnPropertyDescriptor(_o, k) {
+        if (typeof k === 'symbol') return undefined
+        const v = rt.tableGet(t, key(k))
+        return v === null ? undefined : { value: v, enumerable: true, configurable: true, writable: true }
+      },
+    })
+    this.luaOf.set(p, t)
+    return p
+  }
+
+  private tableGet(t: LuaTable, k: unknown) {
+    return this.decodeLive(this.callIn(() => this.fnGetLive.call(t, ...(this.encodeLive([k]) as any[])) as unknown[]))[0] ?? null
+  }
+
+  private tableKeys(t: LuaTable): unknown[] {
+    return this.callIn(() => this.fnKeysLive.call(t) as unknown[])
   }
 
   private memberCache = new Map<string, unknown[]>()
@@ -363,14 +526,20 @@ export class LuauRuntime {
         }
         return [m, j]
       }
-      case 12: return [a[i + 1], i + 2]
+      case 12: {
+        const v = a[i + 1]
+        if (v instanceof LuaFunction) return [this.wrapLuaFunction(v), i + 2]
+        if (v instanceof LuaTable) return [this.wrapLuaTable(v), i + 2]
+        return [v, i + 2]
+      }
+      case 13: return [this.jsRefs.get(n(1)), i + 2]
     }
     throw new Error(`bad bridge tag ${tag}`)
   }
 }
 
 /** Validate/convert a value assigned from Luau to a typed property. */
-function coerce(def: PropDef, prop: string, v: unknown): unknown {
+export function coerce(def: PropDef, prop: string, v: unknown): unknown {
   const t = def.type
   const fail = (): never => {
     throw new Error(`Unable to assign property ${prop}. ${t.startsWith('Enum.') ? 'EnumItem' : t} expected, got ${luauTypeName(v)}`)
@@ -424,4 +593,25 @@ function cleanTraceback(tb: string) {
     .filter((l) => l.trim() && !l.includes('RossEngine.Prelude') && l.trim() !== '[C]' && !l.includes('stack traceback'))
     .map((l) => '  ' + l.trim())
     .join('\n')
+}
+
+const isEngineValue = (v: unknown) =>
+  v instanceof Instance || v instanceof Vector3 || v instanceof CFrame || v instanceof Color3 || v instanceof Vector2
+  || v instanceof UDim2 || v instanceof UDim || v instanceof EnumItem || v instanceof Multi
+
+/** Pyodide proxies (detected structurally so the Luau runtime doesn't depend on Pyodide). */
+function isForeignProxy(v: unknown) {
+  return !!v && (typeof v === 'object' || typeof v === 'function') && typeof (v as any).toJs === 'function' && typeof (v as any).destroy === 'function'
+}
+
+/** Luau tables arrive as Maps; foreign code expects arrays/objects. */
+export function plainify(v: unknown): unknown {
+  if (v instanceof Map) {
+    const keys = [...v.keys()]
+    if (keys.length && keys.every((k, i) => k === i + 1)) return [...v.values()].map(plainify)
+    const o: Record<string, unknown> = {}
+    for (const [k, x] of v) o[String(k)] = plainify(x)
+    return o
+  }
+  return v
 }

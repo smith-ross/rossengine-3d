@@ -11,11 +11,17 @@ import { GuiRenderer } from '../gui/GuiRenderer'
 import { CharacterController, buildDefaultCharacter, findHumanoidModel } from './Character'
 import { TweenManager } from './Tweens'
 import { keyCodeName } from './Input'
+import { ScriptHost } from '../scripting/ScriptHost'
+import { TypeScriptRuntime } from '../scripting/TypeScriptRuntime'
+import { PythonRuntime } from '../scripting/PythonRuntime'
+import { languageOf } from '../scripting/languages'
 import { assets } from '../assets'
 
 export interface SessionOptions {
   output: OutputSink
   playerName?: string
+  /** where Pyodide's files are served (defaults to ./pyodide/ next to the page) */
+  pythonIndexURL?: string
 }
 
 export class GameSession implements Runtime {
@@ -23,6 +29,7 @@ export class GameSession implements Runtime {
   renderer!: SceneRenderer
   physics!: Physics
   luau!: LuauRuntime
+  scripts!: ScriptHost
   gui!: GuiRenderer
   private tweens = new TweenManager()
   private controllers = new Map<Model, CharacterController>()
@@ -77,6 +84,16 @@ export class GameSession implements Runtime {
     this.physics = new Physics(game)
     this.gui = new GuiRenderer(this.wrapper)
     this.luau = await LuauRuntime.create(game, this.opts.output)
+    // TypeScript and Python run on the shared JS scripting host (Python only loads if the place uses it)
+    this.scripts = new ScriptHost(game, this.opts.output, this.luau)
+    new TypeScriptRuntime(this.scripts)
+    if (game.getDescendants().some((d) => d.isA('LuaSourceContainer') && languageOf(d) === 'Python')) {
+      try {
+        await PythonRuntime.create(this.scripts, this.opts.pythonIndexURL)
+      } catch (e) {
+        this.opts.output('error', `Python failed to load: ${(e as Error)?.message ?? e}`)
+      }
+    }
 
     // script lifecycle: run scripts when they appear in a runnable location
     this.cleanup.push(game.observe({
@@ -86,7 +103,7 @@ export class GameSession implements Runtime {
       changed: (inst, prop) => {
         if (prop === 'Enabled' && isA(inst.classInfo, 'BaseScript')) {
           if (inst.get('Enabled')) this.maybeRunScript(inst)
-          else if (this.running.has(inst)) { this.running.delete(inst); this.luau.killScript(inst) }
+          else if (this.running.has(inst)) { this.running.delete(inst); this.scripts.kill(inst) }
         }
         if (inst.className === 'Sound') this.soundChanged(inst, prop)
       },
@@ -96,7 +113,7 @@ export class GameSession implements Runtime {
 
     // 1. server scripts
     for (const d of game.getDescendants()) this.maybeRunScript(d)
-    this.luau.step(0)
+    this.scripts.step(0)
     // 2. NPC humanoids already in the workspace
     for (const d of ws.getDescendants()) this.maybeControl(d)
     // 3. the local player joins
@@ -113,6 +130,7 @@ export class GameSession implements Runtime {
     for (const c of this.cleanup) c()
     for (const c of this.controllers.values()) c.dispose()
     for (const a of this.sounds.values()) a.pause()
+    this.scripts.destroy()
     this.luau.destroy()
     this.renderer.dispose()
     this.physics.dispose()
@@ -133,7 +151,7 @@ export class GameSession implements Runtime {
   private maybeRunScript(s: Instance) {
     if (this.running.has(s) || !isScriptRunnable(s) || !this.scriptLocationOk(s)) return
     this.running.add(s)
-    this.luau.runScript(s)
+    this.scripts.runScript(s)
   }
 
   private onAdded(i: Instance) {
@@ -142,7 +160,7 @@ export class GameSession implements Runtime {
   }
 
   private onRemoving(i: Instance) {
-    if (this.running.has(i)) { this.running.delete(i); this.luau.killScript(i) }
+    if (this.running.has(i)) { this.running.delete(i); this.scripts.kill(i) }
     if (i instanceof Model) {
       const c = this.controllers.get(i)
       if (c) { c.dispose(); this.controllers.delete(i) }
@@ -235,8 +253,8 @@ export class GameSession implements Runtime {
     if (this.stopped) return
     this.gameTime += dt
     const rs = this.game.getService('RunService')
-    this.luau.fireNow(rs, 'Stepped', [this.gameTime, dt])
-    this.luau.fireNow(rs, 'PreSimulation', [dt])
+    this.scripts.fireFrame(rs, 'Stepped', [this.gameTime, dt])
+    this.scripts.fireFrame(rs, 'PreSimulation', [dt])
 
     // player movement from keyboard (camera relative)
     const ctl = this.localController()
@@ -261,13 +279,13 @@ export class GameSession implements Runtime {
       this.debris = this.debris.filter((d) => d.at > this.gameTime)
       for (const d of due) d.inst.destroy()
     }
-    this.luau.step(this.gameTime)
-    this.luau.fireNow(rs, 'PostSimulation', [dt])
-    this.luau.fireNow(rs, 'Heartbeat', [dt])
+    this.scripts.step(this.gameTime)
+    this.scripts.fireFrame(rs, 'PostSimulation', [dt])
+    this.scripts.fireFrame(rs, 'Heartbeat', [dt])
 
     this.updateCamera(dt)
-    this.luau.renderStep(dt)
-    this.luau.fireNow(rs, 'RenderStepped', [dt])
+    this.scripts.renderStep(dt)
+    this.scripts.fireFrame(rs, 'RenderStepped', [dt])
     const cam = this.camera()
     if (cam) this.renderer.setCameraCFrame(cam.get<CFrame>('CFrame'), cam.get<number>('FieldOfView'))
     this.updateMouse()
@@ -430,10 +448,10 @@ export class GameSession implements Runtime {
         this.rmbDrag.x = e.clientX
         this.rmbDrag.y = e.clientY
       }
-      if (this.luau.isListening(uis(), 'InputChanged')) {
+      if (this.scripts.isListening(uis(), 'InputChanged')) {
         uis().fire('InputChanged', makeInput('MouseMovement', 'Change', 'Unknown', new Vector3(this.mouse.x, this.mouse.y, 0), new Vector3(e.movementX, e.movementY, 0)), false)
       }
-      if (this.mouseObj && this.luau.isListening(this.mouseObj, 'Move')) this.mouseObj.fire('Move')
+      if (this.mouseObj && this.scripts.isListening(this.mouseObj, 'Move')) this.mouseObj.fire('Move')
     })
     on(el, 'wheel', (e) => {
       e.preventDefault()

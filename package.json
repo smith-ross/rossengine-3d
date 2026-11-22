@@ -19,11 +19,15 @@
     "@dimforge/rapier3d-compat": "^0.21.0",
     "@luau-rs/luau": "^0.739.0",
     "@monaco-editor/react": "^4.7.0",
+    "acorn": "^8.19.0",
+    "acorn-walk": "^8.3.5",
     "fflate": "^0.8.3",
     "lucide-react": "^1.77.0",
     "monaco-editor": "^0.57.0",
+    "pyodide": "^314.0.8",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sucrase": "^3.35.1",
     "three": "^0.187.0"
   },
   "devDependencies": {
