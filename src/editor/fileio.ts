@@ -1,10 +1,17 @@
 // Opening/saving .rbe place files (File System Access API when available, download/upload otherwise).
 import { editor, PlaceFile } from './store'
+import { desktop } from './desktop'
 
 const EXT = '.rbe'
 const pickerTypes = [{ description: 'RossEngine place', accept: { 'application/json': [EXT, '.json'] } }]
 
 export async function openPlace() {
+  if (desktop) {
+    const r = await desktop.open()
+    if (!r) return
+    try { editor.openFile(JSON.parse(r.text) as PlaceFile, { desktopToken: r.token, name: r.name }) } catch (e) { editor.log('error', `Could not open ${r.name}: ${(e as Error).message}`) }
+    return
+  }
   try {
     if ('showOpenFilePicker' in window) {
       const [handle] = await (window as any).showOpenFilePicker({ types: pickerTypes })
@@ -26,9 +33,25 @@ export async function openPlace() {
   input.click()
 }
 
-export async function savePlace(saveAs = false) {
-  if (editor.playing) { editor.log('warn', 'Stop the game before saving.'); return }
+/** Save the place; resolves true if it was written. */
+export async function savePlace(saveAs = false): Promise<boolean> {
+  if (editor.playing) { editor.log('warn', 'Stop the game before saving.'); return false }
   const text = JSON.stringify(editor.toFile(), null, 1)
+  if (desktop) {
+    try {
+      const tokenNow = saveAs ? null : editor.fileHandle?.desktopToken
+      const r = tokenNow ? await desktop.save(tokenNow, text) : await desktop.saveAs(safeName(editor.placeName), text)
+      if (!r) return false
+      editor.fileHandle = { desktopToken: r.token, name: r.name }
+      editor.dirty = false
+      editor.log('system', `Saved "${editor.placeName}" to ${r.name}`)
+      editor.emit()
+      return true
+    } catch (e) {
+      editor.log('error', `Save failed: ${(e as Error).message}`)
+      return false
+    }
+  }
   try {
     if ('showSaveFilePicker' in window) {
       let handle = saveAs ? null : editor.fileHandle
@@ -42,16 +65,17 @@ export async function savePlace(saveAs = false) {
       editor.dirty = false
       editor.log('system', `Saved "${editor.placeName}" to ${handle.name}`)
       editor.emit()
-      return
+      return true
     }
   } catch (e) {
-    if ((e as Error).name === 'AbortError') return
+    if ((e as Error).name === 'AbortError') return false
     editor.log('warn', `Save failed (${(e as Error).message}); downloading instead.`)
   }
   download(safeName(editor.placeName) + EXT, text)
   editor.dirty = false
   editor.log('system', `Downloaded "${editor.placeName}${EXT}"`)
   editor.emit()
+  return true
 }
 
 export function exportGameJson() {

@@ -18,7 +18,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    watch: { ignored: ['**/player-template/**', '**/player-build/**', '**/builds/**', '**/scratch/**'] },
+    watch: { ignored: ['**/player-template/**', '**/player-build/**', '**/builds/**', '**/scratch/**', '**/studio-build/**', '**/studio-dist/**'] },
   },
   build: {
     outDir: 'dist',

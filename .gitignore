@@ -5,3 +5,5 @@ player-template
 scratch
 *.log
 player-build
+studio-build
+studio-dist

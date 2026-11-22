@@ -9,7 +9,9 @@
     "build:player": "node tools/build-player.mjs",
     "player": "electron electron/dev-main.cjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "studio": "node tools/studio-dev.mjs",
+    "build:studio": "node tools/build-studio.mjs"
   },
   "keywords": [],
   "author": "",

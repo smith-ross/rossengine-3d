@@ -264,4 +264,6 @@ select.prop-input { background: var(--panel); }
 .notice.error { background: #44201f; color: #ffb3b3; white-space: pre-wrap; max-height: 200px; overflow: auto; }
 .notice.ok { background: #1f3b25; color: #b9f0c4; }
 .notice .row { display: flex; gap: 8px; margin-top: 8px; }
+.row-inline { display: flex; gap: 8px; align-items: center; }
+.row-inline .path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 8px; }
 .modal-actions { display: flex; gap: 8px; margin-top: 14px; align-items: center; }

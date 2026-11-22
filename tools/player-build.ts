@@ -85,29 +85,8 @@ export interface ExportResult { dir: string; exe: string }
 
 /** Copy the template into builds/<name>, add game.json and rename the executable. */
 export async function exportGame(name: string, placeJson: string, platform: string = process.platform, log: (m: string) => void = console.log): Promise<ExportResult> {
-  const safe = name.replace(/[^\w\- ]+/g, '').trim() || 'Game'
   const template = await ensureTemplate(platform, log)
-  const dir = path.join(BUILDS_DIR, `${safe}-${platform}-${ARCH}`)
-  log(`Exporting "${safe}" to ${dir}`)
-  fs.rmSync(dir, { recursive: true, force: true })
-  fs.cpSync(template, dir, { recursive: true })
-  fs.rmSync(path.join(dir, '.ross-built'), { force: true })
-  // game data lives next to app.asar in resources/
-  const resources = platform === 'darwin'
-    ? path.join(dir, `${PLAYER_NAME}.app`, 'Contents', 'Resources')
-    : path.join(dir, 'resources')
-  fs.writeFileSync(path.join(resources, 'game.json'), placeJson)
-  let exe: string
-  if (platform === 'win32') {
-    exe = path.join(dir, `${safe}.exe`)
-    fs.renameSync(path.join(dir, `${PLAYER_NAME}.exe`), exe)
-  } else if (platform === 'darwin') {
-    exe = path.join(dir, `${safe}.app`)
-    fs.renameSync(path.join(dir, `${PLAYER_NAME}.app`), exe)
-  } else {
-    exe = path.join(dir, safe.replace(/ /g, '_'))
-    fs.renameSync(path.join(dir, PLAYER_NAME), exe)
-  }
-  fs.writeFileSync(path.join(dir, 'README.txt'), `${safe}\n\nMade with RossEngine. Run ${path.basename(exe)} to play.\nF11 toggles fullscreen, F9 opens the developer console.\n`)
-  return { dir, exe }
+  const { exportGame: doExport } = require('../electron/export-game.cjs') as typeof import('../electron/export-game.cjs')
+  log(`Exporting "${name}" to ${BUILDS_DIR}`)
+  return doExport({ templateDir: template, outRoot: BUILDS_DIR, name, placeJson, platform, arch: ARCH })
 }

@@ -16,6 +16,7 @@ import {
 import { openPlace, savePlace } from './fileio'
 import { BasePart } from '../engine/classes'
 import { formatBytes } from './assetOps'
+import { desktop } from './desktop'
 import { EXTENSION, languageOf } from '../engine/scripting/languages'
 
 // ---- resizable layout ----------------------------------------------------------
@@ -59,7 +60,29 @@ export function App() {
   }, [])
   useEffect(() => {
     document.title = `${ed.dirty ? '● ' : ''}${ed.placeName} — RossEngine Studio`
+    desktop?.setDirty(ed.dirty)
   }, [ed.placeName, ed.dirty])
+  // native menu (RossEngine Studio desktop app)
+  useEffect(() => desktop?.onMenu(async (id) => {
+    const discardOk = () => !editor.dirty || window.confirm('Discard unsaved changes to this place?')
+    switch (id) {
+      case 'new-baseplate': if (discardOk()) editor.newPlace('baseplate'); break
+      case 'new-demo': if (discardOk()) editor.newPlace('demo'); break
+      case 'new-languages': if (discardOk()) editor.newPlace('languages'); break
+      case 'open': if (discardOk()) void openPlace(); break
+      case 'save': void savePlace(); break
+      case 'save-as': void savePlace(true); break
+      case 'build': setBuilding(true); break
+      case 'undo': editor.undo(); break
+      case 'redo': editor.redo(); break
+      case 'play': void editor.play(); break
+      case 'stop': editor.stop(); break
+      case 'save-and-close':
+        if (editor.playing) editor.stop()
+        if (await savePlace()) desktop?.closeNow()
+        break
+    }
+  }), [])
   useEffect(() => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)) } catch { /* ignore */ } }, [layout])
 
   const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
