@@ -342,9 +342,9 @@ export class SceneRenderer {
     const amb = lighting.get<Color3>('Ambient')
     const out = lighting.get<Color3>('OutdoorAmbient')
     this.ambient.color.setRGB(amb.r, amb.g, amb.b, THREE.SRGBColorSpace)
-    this.ambient.intensity = 1.0
+    this.ambient.intensity = 1.5
     this.hemi.color.setRGB(out.r, out.g, out.b, THREE.SRGBColorSpace).lerp(new THREE.Color(0xbfd8ff), 0.5)
-    this.hemi.intensity = 0.4 + daylight * 0.8
+    this.hemi.intensity = 0.8 + daylight * 1.0
     this.sun.color.setHSL(0.1, 0.6 * (1 - daylight) + 0.1, 0.9)
     const skyMat = this.sky.material as THREE.ShaderMaterial
     skyMat.uniforms.daylight.value = daylight

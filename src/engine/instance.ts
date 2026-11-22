@@ -344,8 +344,7 @@ export function serialize(root: Instance, includeRoot = true): SerializedInstanc
 }
 
 /** Build instances from serialized data. If `into` is given, the root's props/children are applied to it. */
-export function deserialize(data: SerializedInstance, into?: Instance): Instance {
-  const byRef = new Map<number, Instance>()
+export function deserialize(data: SerializedInstance, into?: Instance, byRef = new Map<number, Instance>()): Instance {
   const pendingRefs: Array<() => void> = []
   const build = (d: SerializedInstance, existing?: Instance): Instance => {
     let inst = existing
