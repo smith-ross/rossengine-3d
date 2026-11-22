@@ -15,7 +15,10 @@ export default defineConfig({
       'monaco-esm': resolve(import.meta.dirname, 'node_modules/monaco-editor/esm/vs'),
     },
   },
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    watch: { ignored: ['**/player-template/**', '**/player-build/**', '**/builds/**', '**/scratch/**'] },
+  },
   build: {
     outDir: 'dist',
     target: 'es2022',

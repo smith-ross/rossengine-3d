@@ -1,0 +1,8 @@
+{
+  "name": "rossplayer",
+  "productName": "RossPlayer",
+  "version": "0.1.0",
+  "main": "main.cjs",
+  "description": "RossEngine game player",
+  "electronVersion": "45.4.1"
+}

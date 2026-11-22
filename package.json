@@ -4,10 +4,12 @@
   "description": "Browser 3D engine scripted in Luau, with editor and Electron runtime",
   "scripts": {
     "dev": "vite",
+    "editor": "vite build && vite preview --port 5173",
     "build": "vite build",
     "build:player": "node tools/build-player.mjs",
-    "typecheck": "tsc --noEmit -p .",
-    "player": "electron electron/dev-main.cjs"
+    "player": "electron electron/dev-main.cjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
   },
   "keywords": [],
   "author": "",
