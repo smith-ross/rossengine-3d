@@ -1,6 +1,7 @@
 // Renders ScreenGui trees as DOM elements layered over the 3D viewport.
 import { Color3, EnumItem, UDim, UDim2, Vector2 } from '../datatypes'
 import { Instance } from '../instance'
+import { assets } from '../assets'
 
 const FONTS: Record<string, string> = {
   SourceSans: '"Source Sans 3", "Segoe UI", Arial, sans-serif',
@@ -218,8 +219,8 @@ export class GuiRenderer {
       s.lineHeight = '1.1'
     }
     if (inst.classInfo.props.has('Image')) {
-      const img = inst.get<string>('Image')
-      if (img && /^(https?:|data:)/.test(img)) {
+      const img = assets.url(inst.get<string>('Image'))
+      if (img) {
         s.backgroundImage = `url("${img.replace(/"/g, '%22')}")`
         s.backgroundSize = 'contain'
         s.backgroundRepeat = 'no-repeat'

@@ -11,6 +11,7 @@ import { GuiRenderer } from '../gui/GuiRenderer'
 import { CharacterController, buildDefaultCharacter, findHumanoidModel } from './Character'
 import { TweenManager } from './Tweens'
 import { keyCodeName } from './Input'
+import { assets } from '../assets'
 
 export interface SessionOptions {
   output: OutputSink
@@ -513,11 +514,12 @@ export class GameSession implements Runtime {
       a.addEventListener('ended', () => { sound.rawSet('Playing', false); sound.fire('Ended', id) })
       this.sounds.set(sound, a)
     }
-    if (!/^(https?:|data:|blob:|file:)/.test(id)) {
-      if (action === 'Play') this.opts.output('warn', `Sound "${sound.getFullName()}": SoundId must be a URL or data: URI`)
+    const url = assets.url(id)
+    if (!url) {
+      if (action === 'Play') this.opts.output('warn', id ? `Sound "${sound.getFullName()}": asset "${id}" was not found` : `Sound "${sound.getFullName()}" has no SoundId — import an audio file in the Assets panel`)
       return
     }
-    if (a.src !== id) a.src = id
+    if (a.src !== url) a.src = url
     a.volume = Math.min(1, Math.max(0, sound.get<number>('Volume')))
     a.loop = !!sound.get('Looped')
     a.playbackRate = sound.get<number>('PlaybackSpeed') || 1

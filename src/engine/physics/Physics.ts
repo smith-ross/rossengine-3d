@@ -3,6 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat'
 import { CFrame, EnumItem, Vector3 } from '../datatypes'
 import { Instance } from '../instance'
 import { BasePart, DataModel } from '../classes'
+import { loadMesh, loadedMesh } from '../render/meshes'
 
 let initPromise: Promise<void> | null = null
 export function initPhysics() {
@@ -98,7 +99,7 @@ export class Physics {
           b.rb.setAngvel({ x: v.x, y: v.y, z: v.z }, true)
           break
         }
-        case 'Anchored': case 'CanCollide': case 'Size': case 'Shape': case 'CanTouch': case 'Massless':
+        case 'Anchored': case 'CanCollide': case 'Size': case 'Shape': case 'CanTouch': case 'Massless': case 'MeshId': case 'CollisionFidelity':
           this.dirty.add(inst)
           break
       }
@@ -149,7 +150,7 @@ export class Physics {
       desc.setLinvel(v.x, v.y, v.z).setAngvel({ x: w.x, y: w.y, z: w.z })
     }
     const rb = this.world.createRigidBody(desc)
-    const cdesc = role === 'root' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0) : shapeFor(part)
+    const cdesc = role === 'root' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0) : this.shapeFor(part)
     const canCollide = part.get<boolean>('CanCollide')
     if (role === 'limb' || (!canCollide && role !== 'root')) cdesc.setSensor(true)
     cdesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
@@ -160,6 +161,17 @@ export class Physics {
     const body: Body = { part, rb, collider, role }
     this.bodies.set(part, body)
     this.byCollider.set(collider.handle, body)
+  }
+
+  /** Collider shape; MeshParts with Hull fidelity get rebuilt once their mesh has loaded. */
+  private shapeFor(part: BasePart) {
+    if (part.className === 'MeshPart' && part.get<EnumItem>('CollisionFidelity')?.name === 'Hull') {
+      const meshId = part.get<string>('MeshId')
+      if (meshId && loadedMesh(meshId) === undefined) {
+        void loadMesh(meshId).then(() => { if (!part.destroyed && this.bodies.has(part)) this.dirty.add(part) })
+      }
+    }
+    return shapeFor(part)
   }
 
   private removeJoint(weld: Instance) {
@@ -323,6 +335,19 @@ function matchesCharacter(list: Instance[], p: Instance) {
 function shapeFor(part: BasePart): RAPIER.ColliderDesc {
   const s = part.size
   const hx = Math.max(s.x / 2, 0.025), hy = Math.max(s.y / 2, 0.025), hz = Math.max(s.z / 2, 0.025)
+  if (part.className === 'MeshPart') {
+    const meshId = part.get<string>('MeshId')
+    if (meshId && part.get<EnumItem>('CollisionFidelity')?.name === 'Hull') {
+      const m = loadedMesh(meshId)
+      if (m && m.hullPoints.length >= 12) {
+        const pts = new Float32Array(m.hullPoints.length)
+        for (let i = 0; i < pts.length; i += 3) { pts[i] = m.hullPoints[i] * s.x; pts[i + 1] = m.hullPoints[i + 1] * s.y; pts[i + 2] = m.hullPoints[i + 2] * s.z }
+        const hull = RAPIER.ColliderDesc.convexHull(pts)
+        if (hull) return hull
+      }
+    }
+    return RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+  }
   if (part.className === 'WedgePart') {
     const pts = new Float32Array([
       -hx, -hy, hz, hx, -hy, hz, hx, hy, hz, -hx, hy, hz,

@@ -1,95 +1,140 @@
-import { useState } from 'react'
+import { ReactNode, useEffect, useRef, useState } from 'react'
+import {
+  Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
+  MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload,
+} from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { insertObject, insertPart, groupSelection, weldSelection } from '../ops'
+import { insertObject, insertPart, groupSelection, ungroupSelection, weldSelection } from '../ops'
 import { openPlace, savePlace } from '../fileio'
+import { importFiles, insertAsset, pickFiles } from '../assetOps'
 import { InsertMenu } from './Explorer'
+import { BasePart } from '../../engine/classes'
+
+function Group_({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rb-group">
+      <div className="rb-items">{children}</div>
+      <div className="rb-label">{label}</div>
+    </div>
+  )
+}
+
+function Btn({ icon, label, onClick, active, disabled, title, className }: {
+  icon: ReactNode; label: string; onClick?: () => void; active?: boolean; disabled?: boolean; title?: string; className?: string
+}) {
+  return (
+    <button className={`tool${active ? ' active' : ''}${className ? ' ' + className : ''}`} disabled={disabled} onClick={onClick} title={title ?? label}>
+      <span className="tool-icon">{icon}</span><span className="tool-label">{label}</span>
+    </button>
+  )
+}
+
+/** A button with a dropdown that closes on outside click. */
+function Drop({ icon, label, disabled, children, wide }: { icon: ReactNode; label: string; disabled?: boolean; children: (close: () => void) => ReactNode; wide?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ left: 0, top: 0 })
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <div className="dropdown" ref={ref}>
+      <button className={`tool${open ? ' active' : ''}`} disabled={disabled} title={label} onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect()
+        setPos({ left: Math.min(r.left, window.innerWidth - 280), top: r.bottom + 2 })
+        setOpen(!open)
+      }}>
+        <span className="tool-icon">{icon}</span><span className="tool-label">{label} <ChevronDown size={10} /></span>
+      </button>
+      {open && <div className={`dropdown-menu${wide ? ' wide' : ''}`} style={pos}>{children(() => setOpen(false))}</div>}
+    </div>
+  )
+}
 
 export function Toolbar({ onBuild }: { onBuild: () => void }) {
   const ed = useEditor()
-  const [menu, setMenu] = useState<'file' | 'part' | 'insert' | null>(null)
   const playing = ed.playing
-  const close = () => setMenu(null)
-  const tool = (t: Tool, label: string, icon: string, key: string) => (
-    <button className={`tool${ed.tool === t ? ' active' : ''}`} disabled={playing} onClick={() => editor.setTool(t)} title={`${label} (${key})`}>
-      <span className="tool-icon">{icon}</span><span>{label}</span>
-    </button>
+  const tool = (t: Tool, label: string, icon: ReactNode, key: string) => (
+    <Btn icon={icon} label={label} active={ed.tool === t} disabled={playing} onClick={() => editor.setTool(t)} title={`${label} (${key})`} />
   )
+  const selParts = ed.selection.filter((s): s is BasePart => s instanceof BasePart)
+  const allAnchored = selParts.length > 0 && selParts.every((p) => p.get('Anchored'))
   return (
-    <div className="toolbar" onMouseLeave={close}>
-      <div className="brand">◆ RossEngine</div>
-      <div className="tb-group">
-        <div className="dropdown">
-          <button className="tool" onClick={() => setMenu(menu === 'file' ? null : 'file')}><span className="tool-icon">☰</span><span>File</span></button>
-          {menu === 'file' && (
-            <div className="dropdown-menu" onClick={close}>
-              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('baseplate')}>New Baseplate</div>
-              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}>New from Demo (Coin Collector)</div>
+    <div className="toolbar">
+      <div className="brand"><Box size={18} /> RossEngine</div>
+      <Group_ label="Place">
+        <Drop icon={<Menu size={18} />} label="File">
+          {(close) => (
+            <div onClick={close}>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('baseplate')}><span><FilePlus size={13} /> New Baseplate</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}><span><FilePlus size={13} /> New from Demo</span></div>
               <div className="menu-sep" />
-              <div className="menu-item" onClick={() => confirmDiscard() && openPlace()}>Open… <span className="menu-shortcut">Ctrl+O</span></div>
-              <div className="menu-item" onClick={() => savePlace()}>Save <span className="menu-shortcut">Ctrl+S</span></div>
-              <div className="menu-item" onClick={() => savePlace(true)}>Save As… <span className="menu-shortcut">Ctrl+Shift+S</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && openPlace()}><span><FolderOpen size={13} /> Open…</span><span className="menu-shortcut">Ctrl+O</span></div>
+              <div className="menu-item" onClick={() => savePlace()}><span><Save size={13} /> Save</span><span className="menu-shortcut">Ctrl+S</span></div>
+              <div className="menu-item" onClick={() => savePlace(true)}><span><Save size={13} /> Save As…</span><span className="menu-shortcut">Ctrl+Shift+S</span></div>
               <div className="menu-sep" />
-              <div className="menu-item" onClick={onBuild}>Build Game…</div>
+              <div className="menu-item" onClick={onBuild}><span><Hammer size={13} /> Build Game…</span></div>
             </div>
           )}
-        </div>
-        <button className="tool" disabled={!editor.canUndo()} onClick={() => editor.undo()} title="Undo (Ctrl+Z)"><span className="tool-icon">↶</span><span>Undo</span></button>
-        <button className="tool" disabled={!editor.canRedo()} onClick={() => editor.redo()} title="Redo (Ctrl+Y)"><span className="tool-icon">↷</span><span>Redo</span></button>
-      </div>
-      <div className="tb-sep" />
-      <div className="tb-group">
-        {tool('select', 'Select', '⌖', 'Ctrl+1')}
-        {tool('move', 'Move', '✥', 'Ctrl+2')}
-        {tool('scale', 'Scale', '⤡', 'Ctrl+3')}
-        {tool('rotate', 'Rotate', '⟳', 'Ctrl+4')}
+        </Drop>
+        <Btn icon={<Undo2 size={18} />} label="Undo" disabled={!editor.canUndo()} onClick={() => editor.undo()} title="Undo (Ctrl+Z)" />
+        <Btn icon={<Redo2 size={18} />} label="Redo" disabled={!editor.canRedo()} onClick={() => editor.redo()} title="Redo (Ctrl+Y)" />
+      </Group_>
+      <Group_ label="Tools">
+        {tool('select', 'Select', <MousePointer2 size={18} />, 'Ctrl+1')}
+        {tool('move', 'Move', <Move size={18} />, 'Ctrl+2')}
+        {tool('scale', 'Scale', <Scaling size={18} />, 'Ctrl+3')}
+        {tool('rotate', 'Rotate', <RotateCw size={18} />, 'Ctrl+4')}
         <div className="snap">
-          <label title="Move/scale snap (studs)">Move <input type="number" min={0} step={0.25} value={ed.snap} onChange={(e) => { editor.snap = Number(e.target.value); editor.emit() }} /></label>
-          <label title="Rotate snap (degrees)">Rotate <input type="number" min={0} step={5} value={ed.rotateSnap} onChange={(e) => { editor.rotateSnap = Number(e.target.value); editor.emit() }} /></label>
+          <label title="Move/scale snap in studs (0 = off)">Move <input type="number" min={0} step={0.25} value={ed.snap} onChange={(e) => { editor.snap = Number(e.target.value); editor.emit() }} onKeyDown={(e) => e.stopPropagation()} /></label>
+          <label title="Rotate snap in degrees (0 = off)">Rotate <input type="number" min={0} step={5} value={ed.rotateSnap} onChange={(e) => { editor.rotateSnap = Number(e.target.value); editor.emit() }} onKeyDown={(e) => e.stopPropagation()} /></label>
         </div>
-      </div>
-      <div className="tb-sep" />
-      <div className="tb-group">
-        <div className="dropdown">
-          <button className="tool" disabled={playing} onClick={() => setMenu(menu === 'part' ? null : 'part')}><span className="tool-icon">■</span><span>Part ▾</span></button>
-          {menu === 'part' && (
-            <div className="dropdown-menu" onClick={close}>
-              <div className="menu-item" onClick={() => insertPart('Block')}>■ Block</div>
-              <div className="menu-item" onClick={() => insertPart('Ball')}>● Sphere</div>
-              <div className="menu-item" onClick={() => insertPart('Cylinder')}>▮ Cylinder</div>
-              <div className="menu-item" onClick={() => insertPart('Wedge')}>◣ Wedge</div>
-              <div className="menu-item" onClick={() => insertPart('Spawn')}>⊕ SpawnLocation</div>
+      </Group_>
+      <Group_ label="Insert">
+        <Drop icon={<Box size={18} />} label="Part" disabled={playing}>
+          {(close) => (
+            <div onClick={close}>
+              <div className="menu-item" onClick={() => insertPart('Block')}><span><Box size={13} /> Block</span></div>
+              <div className="menu-item" onClick={() => insertPart('Ball')}><span><Circle size={13} /> Sphere</span></div>
+              <div className="menu-item" onClick={() => insertPart('Cylinder')}><span><Cylinder size={13} /> Cylinder</span></div>
+              <div className="menu-item" onClick={() => insertPart('Wedge')}><span><Triangle size={13} /> Wedge</span></div>
+              <div className="menu-item" onClick={() => insertPart('Spawn')}><span><MapPin size={13} /> SpawnLocation</span></div>
             </div>
           )}
-        </div>
-        <button className="tool" disabled={playing} onClick={() => insertObject('Script')} title="Insert Script"><span className="tool-icon">📜</span><span>Script</span></button>
-        <div className="dropdown">
-          <button className="tool" disabled={playing} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}><span className="tool-icon">＋</span><span>Object ▾</span></button>
-          {menu === 'insert' && <div className="dropdown-anchor"><InsertMenu onDone={close} /></div>}
-        </div>
-        <button className="tool" disabled={playing || !ed.selection.length} onClick={groupSelection} title="Group (Ctrl+G)"><span className="tool-icon">◈</span><span>Group</span></button>
-        <button className="tool" disabled={playing || ed.selection.length < 2} onClick={weldSelection} title="Weld selected parts together"><span className="tool-icon">⛓</span><span>Weld</span></button>
-      </div>
-      <div className="tb-sep" />
-      <div className="tb-group">
+        </Drop>
+        <Btn icon={<Shapes size={18} />} label="Model" disabled={playing} title="Import a 3D model file (.glb, .gltf, .obj, .fbx, .stl) as a MeshPart"
+          onClick={async () => { for (const a of await importFiles(await pickFiles('mesh'))) await insertAsset(a) }} />
+        <Btn icon={<FileCode2 size={18} />} label="Script" disabled={playing} onClick={() => insertObject('Script')} title="Insert a Script" />
+        <Btn icon={<Braces size={18} />} label="Module" disabled={playing} onClick={() => insertObject('ModuleScript')} title="Insert a ModuleScript (load it with require)" />
+        <Drop icon={<Plus size={18} />} label="Object" disabled={playing} wide>
+          {(close) => <InsertMenu onDone={close} inline />}
+        </Drop>
+      </Group_>
+      <Group_ label="Arrange">
+        <Btn icon={<Group size={18} />} label="Group" disabled={playing || !ed.selection.length} onClick={groupSelection} title="Group into a Model (Ctrl+G)" />
+        <Btn icon={<Ungroup size={18} />} label="Ungroup" disabled={playing || !ed.selection.some((s) => s.className === 'Model' || s.className === 'Folder')} onClick={ungroupSelection} title="Ungroup (Ctrl+U)" />
+        <Btn icon={<Anchor size={18} />} label="Anchor" active={allAnchored} disabled={playing || !selParts.length}
+          onClick={() => editor.mutate(() => { for (const p of selParts) p.set('Anchored', !allAnchored) })} title="Toggle Anchored on the selected parts" />
+        <Btn icon={<Link size={18} />} label="Weld" disabled={playing || ed.selection.length < 2} onClick={weldSelection} title="Weld the selected parts together" />
+      </Group_>
+      <Group_ label="Assets">
+        <Btn icon={<Upload size={18} />} label="Import" disabled={playing} onClick={async () => { await importFiles(await pickFiles()); editor.bottomTab = 'assets'; editor.emit() }} title="Import sounds, images and 3D models" />
+      </Group_>
+      <Group_ label="Test">
         {!playing ? (
-          <button className="tool play" disabled={ed.starting} onClick={() => editor.play()} title="Play (F5)"><span className="tool-icon">▶</span><span>Play</span></button>
+          <Btn icon={<Play size={18} />} label="Play" className="play" disabled={ed.starting} onClick={() => editor.play()} title="Play (F5)" />
         ) : (
-          <button className="tool stop" onClick={() => editor.stop()} title="Stop (Shift+F5)"><span className="tool-icon">■</span><span>Stop</span></button>
+          <Btn icon={<CircleStop size={18} />} label="Stop" className="stop" onClick={() => editor.stop()} title="Stop (Shift+F5)" />
         )}
-        <button className="tool" disabled={playing} onClick={onBuild} title="Build a standalone desktop app"><span className="tool-icon">📦</span><span>Build</span></button>
-      </div>
-      <div className="spacer" />
-      <input
-        className="place-name"
-        value={ed.placeName}
-        onChange={(e) => { editor.placeName = e.target.value; editor.dirty = true; editor.emit() }}
-        title="Place name"
-      />
-      {ed.dirty && <span className="dirty" title="Unsaved changes (autosaved to this browser)">●</span>}
+        <Btn icon={<Hammer size={18} />} label="Build" disabled={playing} onClick={onBuild} title="Build a standalone desktop app" />
+      </Group_>
     </div>
   )
 }
 
 function confirmDiscard() {
-  return !editor.dirty || window.confirm('Discard unsaved changes to this place? (They are still autosaved in this browser until you open another place.)')
+  return !editor.dirty || window.confirm('Discard unsaved changes to this place? (The current place stays in the browser autosave until you open or create another one.)')
 }

@@ -353,6 +353,29 @@ defineClass(Part, {
   name: 'Part', superclass: 'BasePart', category: 'Parts',
   props: { Shape: { type: 'Enum.PartType', default: () => enumItem('PartType', 'Block'), category: 'Appearance' } },
 })
+export class MeshPart extends BasePart {}
+defineClass(MeshPart, {
+  name: 'MeshPart', superclass: 'BasePart', category: 'Parts',
+  props: {
+    MeshId: { type: 'Content', content: 'mesh', category: 'Appearance' },
+    TextureID: { type: 'Content', content: 'image', category: 'Appearance' },
+    CollisionFidelity: { type: 'Enum.CollisionFidelity', default: () => enumItem('CollisionFidelity', 'Box'), category: 'Physics' },
+    Size: { type: 'Vector3', default: () => new Vector3(4, 4, 4), category: 'Transform' },
+  },
+})
+
+/** An image stuck on one face of its parent part. */
+class Decal extends Instance {}
+defineClass(Decal, {
+  name: 'Decal', superclass: 'Instance', category: 'Appearance',
+  props: {
+    Texture: { type: 'Content', content: 'image', category: 'Appearance' },
+    Face: { type: 'Enum.NormalId', default: () => enumItem('NormalId', 'Front'), category: 'Appearance' },
+    Color3: { type: 'Color3', default: () => new Color3(1, 1, 1), category: 'Appearance' },
+    Transparency: { type: 'number', category: 'Appearance' },
+  },
+})
+
 class WedgePart extends BasePart {}
 defineClass(WedgePart, { name: 'WedgePart', superclass: 'BasePart', category: 'Parts' })
 class SpawnLocation extends Part {}
@@ -395,7 +418,7 @@ class Sound extends Instance {}
 defineClass(Sound, {
   name: 'Sound', superclass: 'Instance', category: 'Sound',
   props: {
-    SoundId: { type: 'string', category: 'Data' },
+    SoundId: { type: 'Content', content: 'audio', category: 'Data' },
     Volume: { type: 'number', default: () => 0.5, category: 'Data' },
     PlaybackSpeed: { type: 'number', default: () => 1, category: 'Data' },
     Looped: { type: 'bool', category: 'Data' },
@@ -747,7 +770,7 @@ defineClass(TextBox, {
   events: ['FocusLost', 'Focused'],
 })
 const imageProps = {
-  Image: { type: 'string', category: 'Image' },
+  Image: { type: 'Content', content: 'image', category: 'Image' },
   ImageColor3: { type: 'Color3', default: () => new Color3(1, 1, 1), category: 'Image' },
   ImageTransparency: { type: 'number', category: 'Image' },
 } as const

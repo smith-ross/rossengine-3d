@@ -4,24 +4,21 @@ import { CFrame, Color3, EnumItem, Vector3 } from '../datatypes'
 import { Instance } from '../instance'
 import { BasePart, DataModel } from '../classes'
 import { materialTexture } from './textures'
+import { loadMesh, loadTexture } from './meshes'
+import { assets } from '../assets'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
 const UNIT_SPHERE = new THREE.SphereGeometry(0.5, 32, 16)
 const UNIT_CYLINDER = new THREE.CylinderGeometry(0.5, 0.5, 1, 32).rotateZ(Math.PI / 2) // Roblox cylinders run along X
+const UNIT_PLANE = new THREE.PlaneGeometry(1, 1)
 const UNIT_WEDGE = (() => {
   // Vertical face at the back (+Z), slope facing the front (-Z)
   const g = new THREE.BufferGeometry()
   const p = [
-    [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5], // back
-    [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], // front bottom edge
+    [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
+    [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5],
   ]
-  const tris = [
-    [0, 1, 2], [0, 2, 3], // back
-    [4, 2, 5], [4, 3, 2], // slope
-    [4, 5, 1], [4, 1, 0], // bottom
-    [4, 0, 3], // left
-    [5, 2, 1], // right
-  ]
+  const tris = [[0, 1, 2], [0, 2, 3], [4, 2, 5], [4, 3, 2], [4, 5, 1], [4, 1, 0], [4, 0, 3], [5, 2, 1]]
   const pos: number[] = []
   for (const t of tris) for (const i of t) pos.push(...p[i])
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
@@ -30,8 +27,30 @@ const UNIT_WEDGE = (() => {
 })()
 
 interface PartView {
+  /** root object; its matrix is CFrame * scale(Size) */
+  obj: THREE.Object3D
+  /** primitive mesh, or the placeholder box of a MeshPart while its mesh loads */
   mesh: THREE.Mesh
   material: THREE.MeshStandardMaterial
+  /** loaded mesh (MeshPart) */
+  loaded?: THREE.Object3D
+  loadedKey?: string
+  ownMaterials?: boolean
+}
+
+/** Local transform (in part space, before scaling) for a decal on each face. */
+function faceMatrix(face: string, s: Vector3): THREE.Matrix4 {
+  const e = 0.012
+  const m = new THREE.Matrix4()
+  const r = new THREE.Matrix4()
+  switch (face) {
+    case 'Front': m.makeTranslation(0, 0, -s.z / 2 - e); r.makeRotationY(Math.PI); return m.multiply(r).scale(new THREE.Vector3(s.x, s.y, 1))
+    case 'Back': m.makeTranslation(0, 0, s.z / 2 + e); return m.scale(new THREE.Vector3(s.x, s.y, 1))
+    case 'Top': m.makeTranslation(0, s.y / 2 + e, 0); r.makeRotationX(-Math.PI / 2); return m.multiply(r).scale(new THREE.Vector3(s.x, s.z, 1))
+    case 'Bottom': m.makeTranslation(0, -s.y / 2 - e, 0); r.makeRotationX(Math.PI / 2); return m.multiply(r).scale(new THREE.Vector3(s.x, s.z, 1))
+    case 'Right': m.makeTranslation(s.x / 2 + e, 0, 0); r.makeRotationY(Math.PI / 2); return m.multiply(r).scale(new THREE.Vector3(s.z, s.y, 1))
+    default: m.makeTranslation(-s.x / 2 - e, 0, 0); r.makeRotationY(-Math.PI / 2); return m.multiply(r).scale(new THREE.Vector3(s.z, s.y, 1))
+  }
 }
 
 export class SceneRenderer {
@@ -43,9 +62,13 @@ export class SceneRenderer {
   private ambient = new THREE.AmbientLight(0xffffff, 0.3)
   private views = new Map<Instance, PartView>()
   private lights = new Map<Instance, THREE.Light>()
+  private decals = new Map<Instance, THREE.Mesh>()
   private selectionBoxes = new Map<Instance, THREE.Box3Helper>()
+  private hoverBox: THREE.Box3Helper
+  private hovered: Instance | null = null
   private selection: Instance[] = []
   private disposeObserver: () => void
+  private disposeAssets: () => void
   private sky: THREE.Mesh
   private resizeObserver: ResizeObserver
   /** Called every frame before rendering */
@@ -64,9 +87,7 @@ export class SceneRenderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.0
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
-    this.renderer.domElement.style.display = 'block'
-    this.renderer.domElement.style.width = '100%'
-    this.renderer.domElement.style.height = '100%'
+    Object.assign(this.renderer.domElement.style, { display: 'block', width: '100%', height: '100%' })
     this.renderer.domElement.tabIndex = 0
     container.appendChild(this.renderer.domElement)
 
@@ -81,6 +102,14 @@ export class SceneRenderer {
     this.sky = makeSky()
     this.scene.add(this.sky)
 
+    this.hoverBox = new THREE.Box3Helper(new THREE.Box3(), new THREE.Color(0x9fd0ff))
+    ;(this.hoverBox.material as THREE.LineBasicMaterial).depthTest = false
+    ;(this.hoverBox.material as THREE.LineBasicMaterial).transparent = true
+    ;(this.hoverBox.material as THREE.LineBasicMaterial).opacity = 0.6
+    this.hoverBox.renderOrder = 998
+    this.hoverBox.visible = false
+    this.scene.add(this.hoverBox)
+
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
     this.resize()
@@ -90,10 +119,14 @@ export class SceneRenderer {
       added: (inst) => { this.add(inst); for (const d of inst.getDescendants()) this.add(d) },
       removing: (inst) => { this.remove(inst); for (const d of inst.getDescendants()) this.remove(d) },
       reparented: (inst) => {
-        // moving in/out of Workspace
         for (const i of [inst, ...inst.getDescendants()]) { this.remove(i); this.add(i) }
       },
       changed: (inst, prop) => this.changed(inst, prop),
+    })
+    // re-resolve content when assets are imported/removed
+    this.disposeAssets = assets.subscribe(() => {
+      for (const [inst, v] of this.views) if (inst.className === 'MeshPart') { v.loadedKey = undefined; this.updateGeometry(inst as BasePart, v) } else this.updateMaterial(inst as BasePart, v)
+      for (const d of this.decals.keys()) this.updateDecal(d)
     })
     this.applyLighting()
   }
@@ -120,18 +153,17 @@ export class SceneRenderer {
   }
 
   render() {
-    // keep sun shadows centred on the camera
     const target = new THREE.Vector3()
     this.camera.getWorldDirection(target)
     const focus = this.camera.position.clone().add(target.multiplyScalar(40))
     this.sun.target.position.copy(focus)
     this.sun.position.copy(focus).add(this.sunDir.clone().multiplyScalar(300))
     this.sky.position.copy(this.camera.position)
-    for (const [inst, box] of this.selectionBoxes) {
-      const v = this.views.get(inst)
-      if (v) box.box.setFromObject(v.mesh)
-      else if (inst instanceof Instance) box.box.copy(this.boundsOf(inst))
-    }
+    for (const [inst, box] of this.selectionBoxes) box.box.copy(this.boundsOf(inst))
+    if (this.hovered && !this.selection.includes(this.hovered)) {
+      this.hoverBox.box.copy(this.boundsOf(this.hovered))
+      this.hoverBox.visible = !this.hoverBox.box.isEmpty()
+    } else this.hoverBox.visible = false
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -146,6 +178,7 @@ export class SceneRenderer {
   dispose() {
     this.stop()
     this.disposeObserver()
+    this.disposeAssets()
     this.resizeObserver.disconnect()
     for (const v of this.views.values()) v.material.dispose()
     this.renderer.dispose()
@@ -160,26 +193,44 @@ export class SceneRenderer {
 
   // ------------------------------------------------------------------ instances
   private inWorkspace(inst: Instance) {
-    const ws = this.game.workspace
-    return inst.isDescendantOf(ws)
+    return inst.isDescendantOf(this.game.workspace)
   }
 
   private add(inst: Instance) {
-    if (this.views.has(inst) || this.lights.has(inst)) return
+    if (this.views.has(inst) || this.lights.has(inst) || this.decals.has(inst)) return
     if (inst instanceof BasePart) {
       if (!this.inWorkspace(inst)) return
       const material = new THREE.MeshStandardMaterial()
       const mesh = new THREE.Mesh(UNIT_BOX, material)
-      mesh.matrixAutoUpdate = false
       mesh.castShadow = true
       mesh.receiveShadow = true
       mesh.userData.instance = inst
-      const view = { mesh, material }
+      let obj: THREE.Object3D = mesh
+      if (inst.className === 'MeshPart') {
+        material.side = THREE.DoubleSide // imported files often have inconsistent winding
+        obj = new THREE.Group()
+        obj.userData.instance = inst
+        obj.add(mesh)
+      }
+      obj.matrixAutoUpdate = false
+      const view: PartView = { obj, mesh, material }
       this.views.set(inst, view)
-      this.scene.add(mesh)
+      this.scene.add(obj)
       this.updateGeometry(inst, view)
       this.updateTransform(inst, view)
       this.updateMaterial(inst, view)
+      for (const c of inst.children) if (c.className === 'Decal') this.add(c)
+      return
+    }
+    if (inst.className === 'Decal') {
+      if (!(inst.parent instanceof BasePart) || !this.inWorkspace(inst)) return
+      const mat = new THREE.MeshStandardMaterial({ transparent: true, polygonOffset: true, polygonOffsetFactor: -2, depthWrite: false })
+      const m = new THREE.Mesh(UNIT_PLANE, mat)
+      m.matrixAutoUpdate = false
+      m.receiveShadow = true
+      this.decals.set(inst, m)
+      this.scene.add(m)
+      this.updateDecal(inst)
       return
     }
     if (inst.isA('Light') && inst.parent instanceof BasePart && this.inWorkspace(inst)) {
@@ -196,9 +247,15 @@ export class SceneRenderer {
   private remove(inst: Instance) {
     const v = this.views.get(inst)
     if (v) {
-      this.scene.remove(v.mesh)
+      this.scene.remove(v.obj)
       v.material.dispose()
       this.views.delete(inst)
+    }
+    const d = this.decals.get(inst)
+    if (d) {
+      this.scene.remove(d)
+      ;(d.material as THREE.Material).dispose()
+      this.decals.delete(inst)
     }
     const l = this.lights.get(inst)
     if (l) {
@@ -209,48 +266,78 @@ export class SceneRenderer {
     }
     const b = this.selectionBoxes.get(inst)
     if (b) { this.scene.remove(b); this.selectionBoxes.delete(inst) }
+    if (this.hovered === inst) this.hovered = null
   }
 
   private changed(inst: Instance, prop: string) {
     const v = this.views.get(inst)
     if (v) {
+      const p = inst as BasePart
       switch (prop) {
-        case 'CFrame': this.updateTransform(inst as BasePart, v); this.updateChildLights(inst); break
-        case 'Size': this.updateTransform(inst as BasePart, v); this.updateGeometry(inst as BasePart, v); break
-        case 'Shape': this.updateGeometry(inst as BasePart, v); this.updateTransform(inst as BasePart, v); break
-        case 'Color': case 'Material': case 'Transparency': case 'Reflectance': case 'CastShadow':
-          this.updateMaterial(inst as BasePart, v); break
+        case 'CFrame': this.updateTransform(p, v); this.updateAttachments(inst); break
+        case 'Size': this.updateTransform(p, v); this.updateGeometry(p, v); this.updateAttachments(inst); break
+        case 'Shape': case 'MeshId': this.updateGeometry(p, v); this.updateTransform(p, v); break
+        case 'Color': case 'Material': case 'Transparency': case 'Reflectance': case 'CastShadow': case 'TextureID':
+          this.updateMaterial(p, v); break
       }
       return
     }
+    if (this.decals.has(inst)) { this.updateDecal(inst); return }
     if (this.lights.has(inst)) { this.updateLight(inst); return }
     if (inst.className === 'Lighting') this.applyLighting()
   }
 
-  private updateChildLights(part: Instance) {
-    for (const c of part.children) if (this.lights.has(c)) this.updateLight(c)
+  /** lights and decals follow their parent part */
+  private updateAttachments(part: Instance) {
+    for (const c of part.children) {
+      if (this.lights.has(c)) this.updateLight(c)
+      if (this.decals.has(c)) this.updateDecal(c)
+    }
+  }
+
+  private shapeOf(part: BasePart) {
+    if (part.className === 'WedgePart') return 'Wedge'
+    if (part.className === 'MeshPart') return 'Mesh'
+    return part.get<EnumItem | undefined>('Shape')?.name ?? 'Block'
   }
 
   private updateGeometry(part: BasePart, v: PartView) {
-    const shape = part.className === 'WedgePart' ? 'Wedge' : (part.get<EnumItem | undefined>('Shape')?.name ?? 'Block')
+    const shape = this.shapeOf(part)
+    if (shape === 'Mesh') {
+      const meshId = part.get<string>('MeshId')
+      if (v.loadedKey === meshId) return
+      v.loadedKey = meshId
+      if (v.loaded) { v.obj.remove(v.loaded); v.loaded = undefined }
+      v.mesh.visible = true
+      v.mesh.geometry = UNIT_BOX
+      if (!meshId) return
+      void loadMesh(meshId).then((m) => {
+        if (!m || v.loadedKey !== meshId || !this.views.has(part)) return
+        const clone = m.object.clone(true)
+        clone.traverse((o) => { o.userData.instance = part; const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true } })
+        v.loaded = clone
+        v.ownMaterials = m.hasTextures
+        v.obj.add(clone)
+        v.mesh.visible = false
+        this.updateMaterial(part, v)
+      })
+      return
+    }
     v.mesh.geometry = shape === 'Ball' ? UNIT_SPHERE : shape === 'Cylinder' ? UNIT_CYLINDER : shape === 'Wedge' ? UNIT_WEDGE : UNIT_BOX
     this.updateMaterial(part, v)
   }
 
   private updateTransform(part: BasePart, v: PartView) {
     const s = part.size
-    const shape = part.get<EnumItem | undefined>('Shape')?.name
+    const shape = this.shapeOf(part)
     let sx = s.x, sy = s.y, sz = s.z
     if (shape === 'Ball') { const d = Math.min(sx, sy, sz); sx = sy = sz = d }
     else if (shape === 'Cylinder') { const d = Math.min(sy, sz); sy = sz = d }
-    part.cframe.toMatrix4(v.mesh.matrix)
-    v.mesh.matrix.scale(new THREE.Vector3(sx, sy, sz))
-    v.mesh.matrixWorldNeedsUpdate = true
+    part.cframe.toMatrix4(v.obj.matrix)
+    v.obj.matrix.scale(new THREE.Vector3(sx, sy, sz))
+    v.obj.matrixWorldNeedsUpdate = true
     const tex = v.material.map
-    if (tex) {
-      // keep texture density roughly constant (1 tile = 4 studs)
-      tex.repeat.set(Math.max(sx, sz) / 4, Math.max(sy, sz) / 4)
-    }
+    if (tex && !part.get<string>('TextureID')) tex.repeat.set(Math.max(sx, sz) / 4, Math.max(sy, sz) / 4)
   }
 
   setLocalTransparency(inst: Instance, t: number | null) {
@@ -280,21 +367,61 @@ export class SceneRenderer {
       case 'Ice': m.roughness = 0.1; break
       case 'Marble': m.roughness = 0.3; break
     }
-    const texture = materialTexture(mat)
-    if (texture && !(v.mesh.geometry === UNIT_SPHERE)) {
-      const t = texture.clone()
-      t.needsUpdate = true
-      m.map = t
+    const textureId = part.get<string>('TextureID')
+    if (textureId) {
+      m.map = loadTexture(textureId)
+    } else if (part.className !== 'MeshPart') {
+      const texture = materialTexture(mat)
+      if (texture && v.mesh.geometry !== UNIT_SPHERE) {
+        const t = texture.clone()
+        t.needsUpdate = true
+        m.map = t
+      }
     }
     let opacity = 1 - transparency
     if (mat === 'Glass') opacity = Math.min(opacity, 0.6)
     m.transparent = opacity < 1
     m.opacity = opacity
     m.depthWrite = opacity >= 1
-    v.mesh.visible = opacity > 0.001 && !this.hidden.has(part)
-    v.mesh.castShadow = (part.get<boolean>('CastShadow') ?? true) && opacity > 0.5
+    const visible = opacity > 0.001 && !this.hidden.has(part)
+    v.obj.visible = visible
+    const castShadow = (part.get<boolean>('CastShadow') ?? true) && opacity > 0.5
+    v.mesh.castShadow = castShadow
     m.needsUpdate = true
+    // loaded meshes: either keep the file's own (textured) materials or use the part's material
+    if (v.loaded) {
+      const useOwn = v.ownMaterials && !textureId
+      v.loaded.traverse((o) => {
+        const mm = o as THREE.Mesh
+        if (!mm.isMesh) return
+        mm.castShadow = castShadow
+        if (useOwn) {
+          if (!mm.userData.ownMaterial) mm.userData.ownMaterial = Array.isArray(mm.material) ? mm.material.map((x) => x.clone()) : (mm.material as THREE.Material).clone()
+          mm.material = mm.userData.ownMaterial
+          for (const x of Array.isArray(mm.material) ? mm.material : [mm.material]) {
+            x.transparent = opacity < 1
+            x.opacity = opacity
+          }
+        } else mm.material = m
+      })
+    }
     this.updateTransform(part, v)
+  }
+
+  private updateDecal(inst: Instance) {
+    const mesh = this.decals.get(inst)
+    const part = inst.parent
+    if (!mesh || !(part instanceof BasePart)) return
+    const mat = mesh.material as THREE.MeshStandardMaterial
+    const c = inst.get<Color3>('Color3')
+    mat.color.setRGB(c.r, c.g, c.b, THREE.SRGBColorSpace)
+    mat.map = loadTexture(inst.get<string>('Texture'))
+    mat.opacity = 1 - (inst.get<number>('Transparency') ?? 0)
+    mat.needsUpdate = true
+    mesh.visible = !!mat.map && mat.opacity > 0
+    const face = inst.get<EnumItem>('Face')?.name ?? 'Front'
+    part.cframe.toMatrix4(mesh.matrix).multiply(faceMatrix(face, part.size))
+    mesh.matrixWorldNeedsUpdate = true
   }
 
   private updateLight(inst: Instance) {
@@ -334,7 +461,6 @@ export class SceneRenderer {
     if (!lighting) return
     const clock = lighting.get<number>('ClockTime') ?? 14
     const brightness = lighting.get<number>('Brightness') ?? 2
-    // sun travels east->west; noon overhead
     const a = ((clock - 6) / 12) * Math.PI
     this.sunDir.set(Math.cos(a) * 0.8, Math.sin(a), 0.35).normalize()
     const daylight = THREE.MathUtils.clamp(this.sunDir.y * 3 + 0.3, 0, 1)
@@ -358,31 +484,45 @@ export class SceneRenderer {
   }
 
   // ------------------------------------------------------------------ picking & selection
-  pick(clientX: number, clientY: number, ignore?: (inst: Instance) => boolean): { inst: BasePart; point: THREE.Vector3; normal: THREE.Vector3 } | null {
+  ray(clientX: number, clientY: number) {
     const rect = this.renderer.domElement.getBoundingClientRect()
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
     const ray = new THREE.Raycaster()
     ray.setFromCamera(ndc, this.camera)
-    const meshes = [...this.views.values()].map((v) => v.mesh).filter((m) => m.visible)
-    for (const hit of ray.intersectObjects(meshes, false)) {
-      const inst = hit.object.userData.instance as BasePart
-      if (ignore?.(inst)) continue
+    return ray
+  }
+
+  pick(clientX: number, clientY: number, ignore?: (inst: Instance) => boolean): { inst: BasePart; point: THREE.Vector3; normal: THREE.Vector3 } | null {
+    const ray = this.ray(clientX, clientY)
+    const objs = [...this.views.values()].filter((v) => v.obj.visible).map((v) => v.obj)
+    for (const hit of ray.intersectObjects(objs, true)) {
+      if (!hit.object.visible) continue
+      const inst = hit.object.userData.instance as BasePart | undefined
+      if (!inst || ignore?.(inst)) continue
       const normal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0)
       return { inst, point: hit.point, normal }
     }
     return null
   }
 
-  meshOf(inst: Instance) { return this.views.get(inst)?.mesh }
-
   boundsOf(inst: Instance): THREE.Box3 {
     const box = new THREE.Box3()
     for (const i of [inst, ...inst.getDescendants()]) {
       const v = this.views.get(i)
-      if (v) box.expandByObject(v.mesh)
+      if (v) {
+        // oriented box corners of the part (cheaper and tighter than traversing meshes)
+        const p = i as BasePart
+        const s = p.size
+        for (const x of [-0.5, 0.5]) for (const y of [-0.5, 0.5]) for (const z of [-0.5, 0.5]) {
+          const w = p.cframe.pointToWorld(new Vector3(s.x * x, s.y * y, s.z * z))
+          box.expandByPoint(new THREE.Vector3(w.x, w.y, w.z))
+        }
+      }
     }
     return box
   }
+
+  setHover(inst: Instance | null) { this.hovered = inst }
 
   setSelection(insts: Instance[]) {
     this.selection = insts

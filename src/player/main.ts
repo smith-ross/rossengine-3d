@@ -4,12 +4,13 @@ import { GameSession } from '../engine/game/GameSession'
 import { serialize, SerializedInstance } from '../engine/instance'
 import { demoPlace } from '../engine/templates'
 import { DevConsole } from './DevConsole'
+import { assets, SerializedAsset } from '../engine/assets'
 
 declare global {
   interface Window { rossPlayer?: { loadGame(): Promise<string | null>; title?: string } }
 }
 
-async function loadPlace(): Promise<{ name: string; root: SerializedInstance }> {
+async function loadPlace(): Promise<{ name: string; root: SerializedInstance; assets?: SerializedAsset[] }> {
   // 1. Electron player: game data provided by the preload bridge
   if (window.rossPlayer) {
     const text = await window.rossPlayer.loadGame()
@@ -32,6 +33,7 @@ async function main() {
   const consoleUi = new DevConsole(document.body)
   const place = await loadPlace()
   document.title = place.name || 'RossEngine'
+  assets.load(place.assets)
   ;(window as any).__session = await GameSession.start(container, place.root, {
     output: (kind, msg, source) => consoleUi.log(kind, msg, source),
   })

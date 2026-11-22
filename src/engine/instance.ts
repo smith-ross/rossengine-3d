@@ -4,7 +4,7 @@
 import { CFrame, Color3, EnumItem, UDim, UDim2, Vector3, Vector2 } from './datatypes'
 
 export type PropType =
-  | 'string' | 'number' | 'int' | 'bool' | 'Vector3' | 'Vector2' | 'CFrame' | 'Color3' | 'UDim' | 'UDim2' | 'Instance'
+  | 'string' | 'number' | 'int' | 'bool' | 'Vector3' | 'Vector2' | 'CFrame' | 'Color3' | 'UDim' | 'UDim2' | 'Instance' | 'Content'
   | `Enum.${string}`
 
 export interface PropDef {
@@ -17,6 +17,8 @@ export interface PropDef {
   /** Not stored in saved places. */
   noSave?: boolean
   category?: string
+  /** For 'Content' properties: which kind of asset it references */
+  content?: 'audio' | 'image' | 'mesh'
   /** Virtual property (derived from other state). */
   get?: (inst: any) => unknown
   set?: (inst: any, value: any) => void
@@ -259,7 +261,7 @@ function setDataModelRecursive(inst: Instance, dm: DataModelLike | null) {
 
 export function defaultFor(type: PropType): unknown {
   switch (type) {
-    case 'string': return ''
+    case 'string': case 'Content': return ''
     case 'number': case 'int': return 0
     case 'bool': return false
     case 'Vector3': return Vector3.zero

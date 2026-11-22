@@ -6,6 +6,8 @@ import { Instance, SerializedInstance, deserialize, serialize } from '../engine/
 import { baseplatePlace, demoPlace } from '../engine/templates'
 import type { GameSession } from '../engine/game/GameSession'
 import type { OutputKind } from '../engine/luau/LuauRuntime'
+import { assets, SerializedAsset } from '../engine/assets'
+import { idbGet, idbSet } from './persist'
 
 export type Tool = 'select' | 'move' | 'scale' | 'rotate'
 
@@ -13,15 +15,18 @@ export interface LogEntry { id: number; kind: OutputKind | 'system'; message: st
 
 export interface PlaceFile {
   format: 'rossengine-place'
-  version: 1
+  version: 1 | 2
   name: string
   settings?: GameSettings
   root: SerializedInstance
+  /** imported files (sounds, images, meshes), embedded as base64 */
+  assets?: SerializedAsset[]
 }
 
 export interface GameSettings { width: number; height: number; fullscreen: boolean }
 
 const AUTOSAVE_KEY = 'rossengine.autosave'
+const IDB_AUTOSAVE = 'autosave'
 
 let logId = 1
 
@@ -49,10 +54,39 @@ class EditorStore {
   private redoStack: SerializedInstance[] = []
   private unobserve: (() => void) | null = null
   revealLine: { script: Instance; line: number } | null = null
+  bottomTab: 'output' | 'assets' = 'output'
+
+  /** true until the user picks/opens a place this session (shows the start screen) */
+  showStart = true
 
   constructor() {
-    this.game = this.loadAutosave() ?? baseplatePlace()
+    this.game = baseplatePlace()
     this.attach(this.game)
+    assets.subscribe(() => { if (!this.playing && this.ready) { this.dirty = true; this.scheduleAutosave() } this.emit() })
+  }
+
+  ready = false
+  /** Restore the autosaved place (IndexedDB; falls back to the old localStorage autosave). */
+  async init() {
+    try {
+      let file = await idbGet<PlaceFile>(IDB_AUTOSAVE)
+      if (!file) {
+        const raw = localStorage.getItem(AUTOSAVE_KEY)
+        if (raw) file = JSON.parse(raw) as PlaceFile
+      }
+      if (file) {
+        const g = this.fromFile(file)
+        this.placeName = file.name || 'Untitled'
+        if (file.settings) this.settings = file.settings
+        assets.load(file.assets)
+        this.replaceGame(g)
+        this.dirty = false
+      }
+    } catch (e) {
+      console.warn('autosave load failed', e)
+    }
+    this.ready = true
+    this.emit()
   }
 
   subscribe = (fn: () => void) => {
@@ -100,27 +134,16 @@ class EditorStore {
   private scheduleAutosave() {
     if (this.autosaveTimer) clearTimeout(this.autosaveTimer)
     this.autosaveTimer = window.setTimeout(() => {
-      try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(this.toFile())) } catch { /* quota */ }
+      if (!this.ready) return
+      idbSet(IDB_AUTOSAVE, this.toFile())
+        .then(() => { try { localStorage.removeItem(AUTOSAVE_KEY) } catch { /* ignore */ } })
+        .catch((e) => console.warn('autosave failed', e))
     }, 800)
-  }
-
-  private loadAutosave(): DataModel | null {
-    try {
-      const raw = localStorage.getItem(AUTOSAVE_KEY)
-      if (!raw) return null
-      const file = JSON.parse(raw) as PlaceFile
-      this.placeName = file.name || 'Untitled'
-      if (file.settings) this.settings = file.settings
-      return this.fromFile(file)
-    } catch (e) {
-      console.warn('autosave load failed', e)
-      return null
-    }
   }
 
   // ------------------------------------------------------------------ files
   toFile(): PlaceFile {
-    return { format: 'rossengine-place', version: 1, name: this.placeName, settings: this.settings, root: serialize(this.game) }
+    return { format: 'rossengine-place', version: 2, name: this.placeName, settings: this.settings, root: serialize(this.game), assets: assets.serialize() }
   }
 
   private fromFile(file: PlaceFile): DataModel {
@@ -136,6 +159,8 @@ class EditorStore {
     const g = this.fromFile(file)
     this.placeName = file.name || 'Untitled'
     if (file.settings) this.settings = { ...this.settings, ...file.settings }
+    assets.load(file.assets)
+    this.showStart = false
     this.fileHandle = handle
     this.replaceGame(g)
     this.undoStack = []
@@ -148,6 +173,8 @@ class EditorStore {
     if (this.playing) this.stop()
     const g = template === 'demo' ? demoPlace() : baseplatePlace()
     this.placeName = template === 'demo' ? 'Coin Collector' : 'Untitled'
+    assets.clear()
+    this.showStart = false
     this.fileHandle = null
     this.replaceGame(g)
     this.undoStack = []
@@ -230,6 +257,7 @@ class EditorStore {
 
   // ------------------------------------------------------------------ output
   log(kind: LogEntry['kind'], message: string, source?: string) {
+    if (kind === 'error') this.bottomTab = 'output'
     this.logs = [...this.logs.slice(-999), { id: logId++, kind, message, source, time: new Date().toLocaleTimeString() }]
     this.emit()
   }

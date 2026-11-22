@@ -376,7 +376,7 @@ function coerce(def: PropDef, prop: string, v: unknown): unknown {
     throw new Error(`Unable to assign property ${prop}. ${t.startsWith('Enum.') ? 'EnumItem' : t} expected, got ${luauTypeName(v)}`)
   }
   switch (t) {
-    case 'string':
+    case 'string': case 'Content':
       if (typeof v === 'string') return v
       if (typeof v === 'number') return String(v)
       return fail()

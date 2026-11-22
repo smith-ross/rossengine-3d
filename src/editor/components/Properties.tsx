@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react'
 import { CFrame, Color3, EnumItem, Enums, UDim, UDim2, Vector2, Vector3, enumItem } from '../../engine/datatypes'
 import { Instance, PropDef } from '../../engine/instance'
 import { editor, useEditor } from '../store'
+import { ChevronDown, ChevronRight, Upload } from 'lucide-react'
+import { AssetKind, assets, contentRef } from '../../engine/assets'
+import { importFiles, pickFiles } from '../assetOps'
+import { useAssets } from './AssetsPanel'
+
+const collapsed = new Set<string>()
 
 const CATEGORY_ORDER = ['Data', 'Appearance', 'Text', 'Image', 'Transform', 'Layout', 'Behavior', 'Physics', 'Game', 'Camera', 'Character', 'Fog', 'Constraints', 'Other']
 
@@ -44,8 +50,10 @@ export function Properties() {
       <div className="props-scroll">
         {ordered.map(([cat, list]) => (
           <div key={cat} className="prop-group">
-            <div className="prop-cat">{cat}</div>
-            {list.map(([name, def]) => (
+            <div className="prop-cat" onClick={() => { if (collapsed.has(cat)) collapsed.delete(cat); else collapsed.add(cat); force((x) => x + 1) }}>
+              {collapsed.has(cat) ? <ChevronRight size={12} /> : <ChevronDown size={12} />} {cat}
+            </div>
+            {!collapsed.has(cat) && list.map(([name, def]) => (
               <PropRow key={name + first.id} name={name} def={def} insts={sel} />
             ))}
           </div>
@@ -69,7 +77,9 @@ function PropRow({ name, def, insts }: { name: string; def: PropDef; insts: Inst
     <div className="prop-row">
       <div className="prop-name" title={name}>{name}</div>
       <div className="prop-value">
-        <ValueEditor type={def.type} value={value} readonly={readonly} onCommit={commit} />
+        {def.type === 'Content'
+          ? <ContentEditor kind={def.content ?? 'image'} value={String(value ?? '')} readonly={readonly} onCommit={commit} />
+          : <ValueEditor type={def.type} value={value} readonly={readonly} onCommit={commit} />}
       </div>
     </div>
   )
@@ -196,6 +206,45 @@ function ValueEditor({ type, value, readonly, onCommit }: { type: string; value:
     )
   }
   return <span className="prop-readonly">{String(value)}</span>
+}
+
+/** Pick an imported asset (or import a new file) for a Content property. */
+function ContentEditor({ kind, value, readonly, onCommit }: { kind: AssetKind; value: string; readonly: boolean; onCommit: (v: string) => void }) {
+  useAssets()
+  const list = assets.list(kind)
+  const current = assets.resolve(value)
+  const url = kind === 'image' ? assets.url(value) : null
+  const IMPORT = '__import__'
+  return (
+    <div className="content-edit">
+      {url && <img className="content-preview" src={url} alt="" />}
+      <select
+        className="prop-input"
+        disabled={readonly}
+        value={current ? contentRef(current) : value ? '__missing__' : ''}
+        onChange={async (e) => {
+          const v = e.target.value
+          if (v === IMPORT) {
+            const [a] = await importFiles(await pickFiles(kind, false))
+            if (a) onCommit(contentRef(a))
+            return
+          }
+          if (v !== '__missing__') onCommit(v)
+        }}
+      >
+        <option value="">(none)</option>
+        {value && !current && <option value="__missing__">⚠ missing: {value}</option>}
+        {list.map((a) => <option key={a.id} value={contentRef(a)}>{a.name}</option>)}
+        <option value={IMPORT}>Import {kind === 'mesh' ? 'model' : kind} file…</option>
+      </select>
+      {!readonly && (
+        <button className="icon-btn plain" title={`Import ${kind} file`} onClick={async () => {
+          const [a] = await importFiles(await pickFiles(kind, false))
+          if (a) onCommit(contentRef(a))
+        }}><Upload size={13} /></button>
+      )}
+    </div>
+  )
 }
 
 function Attributes({ inst }: { inst: Instance }) {

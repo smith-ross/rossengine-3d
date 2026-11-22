@@ -185,6 +185,7 @@ export const Enums: Record<string, string[]> = {
   Font: ['SourceSans', 'SourceSansBold', 'Gotham', 'GothamBold', 'Arial', 'ArialBold', 'Code', 'Cartoon'],
   CameraType: ['Custom', 'Scriptable', 'Fixed'],
   FillDirection: ['Horizontal', 'Vertical'],
+  CollisionFidelity: ['Box', 'Hull'],
   RaycastFilterType: ['Exclude', 'Include', 'Blacklist', 'Whitelist'],
   NormalId: ['Top', 'Bottom', 'Front', 'Back', 'Left', 'Right'],
 }

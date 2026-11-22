@@ -126,7 +126,7 @@ const PROP_OVERRIDES: Record<string, string> = {
 
 function luauType(t: PropType): string {
   switch (t) {
-    case 'string': return 'string'
+    case 'string': case 'Content': return 'string'
     case 'number': case 'int': return 'number'
     case 'bool': return 'boolean'
     case 'Instance': return 'Instance?'

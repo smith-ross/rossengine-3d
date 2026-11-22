@@ -6,6 +6,7 @@ import {
   copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, insertObject, paste, reparent, ungroupSelection,
 } from '../ops'
 import { ClassIcon } from './icons'
+import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
 
 const expanded = new Set<number>()
 
@@ -20,7 +21,7 @@ function sortedChildren(inst: Instance): Instance[] {
   return inst.children.filter((c) => c.name !== '__Mouse')
 }
 
-interface MenuState { x: number; y: number; target: Instance }
+interface MenuState { x: number; y: number; target: Instance; insertOnly?: boolean }
 
 export function Explorer() {
   const ed = useEditor()
@@ -31,6 +32,7 @@ export function Explorer() {
   const [dragOver, setDragOver] = useState<Instance | null>(null)
   const dragging = useRef<Instance[]>([])
   const lastClicked = useRef<Instance | null>(null)
+  const treeRef = useRef<HTMLDivElement>(null)
 
   // expand ancestors of the selection so it is visible
   useEffect(() => {
@@ -69,6 +71,31 @@ export function Explorer() {
     lastClicked.current = inst
   }
 
+  // keep the selected row visible
+  useEffect(() => {
+    const s = ed.selection[ed.selection.length - 1]
+    if (!s) return
+    requestAnimationFrame(() => treeRef.current?.querySelector(`[data-id="${s.id}"]`)?.scrollIntoView({ block: 'nearest' }))
+  }, [ed.selection])
+
+  const onTreeKey = (e: React.KeyboardEvent) => {
+    const cur = ed.selection[ed.selection.length - 1]
+    const i = cur ? rows.findIndex((r) => r.inst === cur) : -1
+    const go = (j: number) => { const r = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (r) { editor.select([r.inst]); lastClicked.current = r.inst } }
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); go(i + 1); break
+      case 'ArrowUp': e.preventDefault(); go(i - 1); break
+      case 'ArrowRight': e.preventDefault(); if (cur && sortedChildren(cur).length) { if (!expanded.has(cur.id)) toggle(cur); else go(i + 1) } break
+      case 'ArrowLeft':
+        e.preventDefault()
+        if (cur && expanded.has(cur.id)) toggle(cur)
+        else if (cur?.parent && cur.parent !== game) editor.select([cur.parent])
+        break
+      case 'F2': e.preventDefault(); if (cur && !ed.playing && !cur.parentLocked) setRenaming(cur); break
+      case 'Enter': if (cur?.isA('LuaSourceContainer')) editor.openScript(cur); break
+    }
+  }
+
   const toggle = (inst: Instance) => {
     if (expanded.has(inst.id)) expanded.delete(inst.id)
     else expanded.add(inst.id)
@@ -77,15 +104,16 @@ export function Explorer() {
 
   return (
     <div className="panel explorer" onClick={() => setMenu(null)}>
-      <div className="panel-title">Explorer</div>
-      <input className="panel-filter" placeholder="Filter workspace (Ctrl+Shift+X)" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <div className="tree" onContextMenu={(e) => e.preventDefault()}>
+      <div className="panel-title">Explorer{ed.playing && <span className="live-badge">LIVE</span>}</div>
+      <div className="search filter"><Search size={12} /><input placeholder="Filter (name or class)" value={filter} onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
+      <div className="tree" ref={treeRef} tabIndex={0} onKeyDown={onTreeKey} onContextMenu={(e) => e.preventDefault()}>
         {rows.map(({ inst, depth }) => {
           const hasChildren = sortedChildren(inst).length > 0
           const selected = ed.selection.includes(inst)
           return (
             <div
               key={inst.id}
+              data-id={inst.id}
               className={`tree-row${selected ? ' selected' : ''}${dragOver === inst ? ' drag-over' : ''}`}
               style={{ paddingLeft: 6 + depth * 14 }}
               onClick={(e) => onRowClick(e, inst)}
@@ -116,7 +144,7 @@ export function Explorer() {
               }}
             >
               <span className="tree-arrow" onClick={(e) => { e.stopPropagation(); if (hasChildren) toggle(inst) }}>
-                {hasChildren ? (expanded.has(inst.id) || filter ? '▾' : '▸') : ''}
+                {hasChildren ? (expanded.has(inst.id) || filter ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
               </span>
               <ClassIcon cls={inst.className} />
               {renaming === inst ? (
@@ -139,11 +167,28 @@ export function Explorer() {
               ) : (
                 <span className="tree-name">{inst.name}</span>
               )}
+              {!ed.playing && (
+                <button
+                  className="row-add"
+                  title={`Insert object into ${inst.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    editor.select([inst])
+                    setMenu({ x: r.left, y: r.bottom, target: inst, insertOnly: true })
+                  }}
+                ><Plus size={12} /></button>
+              )}
             </div>
           )
         })}
       </div>
-      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onRename={(i) => setRenaming(i)} />}
+      {menu && !menu.insertOnly && <ContextMenu menu={menu} onClose={() => setMenu(null)} onRename={(i) => setRenaming(i)} />}
+      {menu?.insertOnly && (
+        <div className="context-menu" style={{ left: Math.min(menu.x - 200, window.innerWidth - 260), top: Math.min(menu.y, window.innerHeight - 420), width: 250 }} onClick={(e) => e.stopPropagation()}>
+          <InsertMenu parent={menu.target} onDone={() => setMenu(null)} inline />
+        </div>
+      )}
     </div>
   )
 }
@@ -180,7 +225,7 @@ function ContextMenu({ menu, onClose, onRename }: { menu: MenuState; onClose: ()
   )
 }
 
-export function InsertMenu({ parent, onDone }: { parent?: Instance; onDone: () => void }) {
+export function InsertMenu({ parent, onDone, inline }: { parent?: Instance; onDone: () => void; inline?: boolean }) {
   const [q, setQ] = useState('')
   const groups = useMemo(() => {
     const m = new Map<string, string[]>()
@@ -194,8 +239,19 @@ export function InsertMenu({ parent, onDone }: { parent?: Instance; onDone: () =
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [q])
   return (
-    <div className="context-menu submenu" onClick={(e) => e.stopPropagation()}>
-      <input className="panel-filter" autoFocus placeholder="Search objects" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+    <div className={inline ? 'insert-inline' : 'context-menu submenu'} onClick={(e) => e.stopPropagation()}>
+      <input
+        className="panel-filter"
+        autoFocus
+        placeholder="Search objects… (Enter inserts)"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter' && groups.length) { insertObject(groups[0][1].sort()[0], parent); onDone() }
+          if (e.key === 'Escape') onDone()
+        }}
+      />
       <div className="submenu-scroll">
         {groups.map(([cat, names]) => (
           <div key={cat}>

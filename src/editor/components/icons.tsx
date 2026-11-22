@@ -1,20 +1,36 @@
-// Small glyph-based class icons for the explorer.
-const ICONS: Record<string, [string, string]> = {
-  Workspace: ['🌐', '#5aa9ff'], Players: ['👥', '#9fd36a'], Lighting: ['💡', '#ffd54a'], ReplicatedStorage: ['📦', '#7fb3ff'],
-  ServerScriptService: ['🗄', '#7cc'], ServerStorage: ['🗃', '#aaa'], StarterGui: ['🖼', '#b48cff'], StarterPlayer: ['🧍', '#9fd36a'],
-  StarterPlayerScripts: ['📁', '#9fd36a'], StarterCharacterScripts: ['📁', '#9fd36a'], SoundService: ['🔊', '#ccc'],
-  Part: ['■', '#b0b6c2'], WedgePart: ['◣', '#b0b6c2'], SpawnLocation: ['⊕', '#8fd18f'], Model: ['◈', '#e7b85a'], Folder: ['📁', '#e7c46a'],
-  Script: ['📜', '#7fd17f'], LocalScript: ['📜', '#6fb6ff'], ModuleScript: ['📜', '#d38fff'], Camera: ['🎥', '#ccc'],
-  Humanoid: ['🙂', '#ffd54a'], Player: ['🧍', '#9fd36a'], ScreenGui: ['▭', '#b48cff'], Frame: ['▢', '#b48cff'],
-  TextLabel: ['T', '#b48cff'], TextButton: ['⏺', '#b48cff'], TextBox: ['⌨', '#b48cff'], ImageLabel: ['🖼', '#b48cff'],
-  ImageButton: ['🖼', '#b48cff'], UICorner: ['◜', '#b48cff'], UIStroke: ['▣', '#b48cff'], UIListLayout: ['☰', '#b48cff'],
-  PointLight: ['✺', '#ffd54a'], SpotLight: ['⚡', '#ffd54a'], Sound: ['♪', '#ccc'], ClickDetector: ['👆', '#ccc'],
-  WeldConstraint: ['⛓', '#ccc'], BindableEvent: ['⚑', '#f99'], BindableFunction: ['ƒ', '#f99'], RemoteEvent: ['⚑', '#fc6'],
-  RemoteFunction: ['ƒ', '#fc6'], ForceField: ['◌', '#7cf'],
+// Class icons for the explorer and menus.
+import {
+  Archive, Box, Boxes, Braces, Clock, FileCode2, Flashlight, Folder, FolderCode, Globe, Image, LayoutTemplate,
+  Lightbulb, Link, List, LucideIcon, MapPin, Monitor, Mouse, MousePointerClick, Music, Package, PersonStanding,
+  Pointer, Shield, Sparkles, Square, SquareDashed, SquareFunction, Sticker, TextCursorInput, Triangle, Type, User,
+  UserRound, Users, Variable, Video, Volume2, Waves, Zap, Shapes,
+} from 'lucide-react'
+
+const ICONS: Record<string, [LucideIcon, string]> = {
+  Workspace: [Globe, '#5aa9ff'], Players: [Users, '#8fd17f'], Lighting: [Lightbulb, '#ffd54a'], ScriptService: [FileCode2, '#7fd17f'],
+  Storage: [Archive, '#7fb3ff'], StarterGui: [LayoutTemplate, '#b48cff'], StarterPlayer: [UserRound, '#8fd17f'],
+  StarterCharacterScripts: [FolderCode, '#8fd17f'], SoundService: [Volume2, '#c0c4cc'],
+  Part: [Box, '#aeb6c4'], MeshPart: [Shapes, '#e79a5a'], WedgePart: [Triangle, '#aeb6c4'], SpawnLocation: [MapPin, '#7fd17f'],
+  Model: [Package, '#e7b85a'], Folder: [Folder, '#e7c46a'], Script: [FileCode2, '#7fd17f'], ModuleScript: [Braces, '#c98fff'],
+  Camera: [Video, '#c0c4cc'], Humanoid: [PersonStanding, '#ffd54a'], Player: [User, '#8fd17f'], PlayerGui: [Monitor, '#b48cff'],
+  Mouse: [Mouse, '#c0c4cc'], ScreenGui: [Monitor, '#b48cff'], Frame: [Square, '#b48cff'], TextLabel: [Type, '#b48cff'],
+  TextButton: [MousePointerClick, '#b48cff'], TextBox: [TextCursorInput, '#b48cff'], ImageLabel: [Image, '#b48cff'],
+  ImageButton: [Image, '#b48cff'], UICorner: [SquareDashed, '#b48cff'], UIStroke: [SquareDashed, '#b48cff'],
+  UIListLayout: [List, '#b48cff'], PointLight: [Lightbulb, '#ffd54a'], SpotLight: [Flashlight, '#ffd54a'], Sound: [Music, '#5ad1c9'],
+  ClickDetector: [Pointer, '#c0c4cc'], WeldConstraint: [Link, '#c0c4cc'], BindableEvent: [Zap, '#ff9a8a'],
+  BindableFunction: [SquareFunction, '#ff9a8a'], ForceField: [Shield, '#7fcfff'], Decal: [Sticker, '#e79a5a'],
+  Tween: [Waves, '#c0c4cc'], InputObject: [Pointer, '#c0c4cc'],
 }
 
-export function ClassIcon({ cls }: { cls: string }) {
-  let [glyph, color] = ICONS[cls] ?? ['•', '#999']
-  if (cls.endsWith('Value')) [glyph, color] = ['▤', '#9cf']
-  return <span className="class-icon" style={{ color }}>{glyph}</span>
+export function iconFor(cls: string): [LucideIcon, string] {
+  if (ICONS[cls]) return ICONS[cls]
+  if (cls.endsWith('Value')) return [Variable, '#7fb3ff']
+  if (cls.endsWith('Service')) return [Boxes, '#c0c4cc']
+  if (cls === 'Clock') return [Clock, '#c0c4cc']
+  return [Sparkles, '#9aa0aa']
+}
+
+export function ClassIcon({ cls, size = 14 }: { cls: string; size?: number }) {
+  const [Icon, color] = iconFor(cls)
+  return <Icon className="class-icon" size={size} color={color} strokeWidth={2} />
 }

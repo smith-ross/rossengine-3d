@@ -9,9 +9,13 @@ import { SceneRenderer } from '../../engine/render/SceneRenderer'
 import { GuiRenderer } from '../../engine/gui/GuiRenderer'
 import { editor, useEditor } from '../store'
 import { insertHint, selectionPivot } from '../ops'
+import { assets } from '../../engine/assets'
+import { importFiles, insertAsset } from '../assetOps'
+import { ASSET_DRAG_TYPE } from './AssetsPanel'
 
 // camera state survives renderer rebuilds (undo, open file...)
 const cam = { pos: new THREE.Vector3(30, 25, 40), yaw: 0.65, pitch: -0.45 }
+;(window as any).__editCam = cam
 
 export function Viewport() {
   const ed = useEditor()
@@ -153,13 +157,89 @@ export function Viewport() {
       const back = new THREE.Vector3(0, 0, 1).applyQuaternion(r.camera.quaternion)
       cam.pos.copy(center).addScaledVector(back, Math.max(8, size * 1.4))
     }
+    const selectable = (hit: Instance | null, alt: boolean): Instance | null => {
+      let target = hit
+      if (target && !alt) for (let p = target.parent; p && p.className !== 'Workspace'; p = p.parent) if (p instanceof Model) target = p
+      return target
+    }
+    // Studio-style dragging: grab a part and slide it along the surfaces under the mouse
+    let drag: {
+      startX: number; startY: number; active: boolean; target: Instance; grabOffset: THREE.Vector3; pivot: CFrame
+      parts: Map<BasePart, CFrame>; half: THREE.Vector3; centerOffset: THREE.Vector3; dragged: Set<Instance>
+    } | null = null
+    const beginDragCandidate = (e: MouseEvent) => {
+      const hit = r.pick(e.clientX, e.clientY, (i) => i.get<boolean>('Locked'))
+      const target = selectable(hit?.inst ?? null, e.altKey)
+      if (!hit || !target || e.ctrlKey || e.shiftKey) return
+      const sel = editor.selection.includes(target) ? editor.selection : [target]
+      const parts = new Map<BasePart, CFrame>()
+      for (const s of sel) for (const p of partsOf(s)) parts.set(p, p.cframe)
+      const pivot = selectionPivot(sel)
+      if (!pivot || !parts.size) return
+      const box = new THREE.Box3()
+      for (const s of sel) box.union(r.boundsOf(s))
+      const center = box.getCenter(new THREE.Vector3())
+      drag = {
+        startX: e.clientX, startY: e.clientY, active: false, target,
+        grabOffset: new THREE.Vector3(center.x - hit.point.x, 0, center.z - hit.point.z),
+        pivot, parts, half: box.getSize(new THREE.Vector3()).multiplyScalar(0.5),
+        centerOffset: new THREE.Vector3(pivot.x - center.x, pivot.y - center.y, pivot.z - center.z),
+        dragged: new Set<Instance>([...parts.keys()]),
+      }
+    }
+    const updateDrag = (e: MouseEvent) => {
+      if (!drag) return
+      if (!drag.active) {
+        if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return
+        drag.active = true
+        if (!editor.selection.includes(drag.target)) editor.select([drag.target])
+        editor.checkpoint()
+        dom.style.cursor = 'grabbing'
+      }
+      const d = drag
+      const hit = r.pick(e.clientX, e.clientY, (i) => d.dragged.has(i))
+      let center: THREE.Vector3
+      if (hit) {
+        const n = hit.normal
+        const ext = Math.abs(n.x) * d.half.x + Math.abs(n.y) * d.half.y + Math.abs(n.z) * d.half.z
+        center = hit.point.clone().addScaledVector(n, ext)
+        if (Math.abs(n.y) > 0.7) center.add(d.grabOffset)
+      } else {
+        // nothing under the mouse: slide on the horizontal plane at the current height
+        const ray = r.ray(e.clientX, e.clientY).ray
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(d.pivot.y - d.centerOffset.y))
+        const p = ray.intersectPlane(plane, new THREE.Vector3())
+        if (!p) return
+        center = p.add(d.grabOffset)
+      }
+      const snap = editor.snap
+      if (snap) { center.x = Math.round(center.x / snap) * snap; center.z = Math.round(center.z / snap) * snap }
+      const newPivot = new Vector3(center.x + d.centerOffset.x, center.y + d.centerOffset.y, center.z + d.centerOffset.z)
+      const delta = new CFrame(newPivot.x - d.pivot.x, newPivot.y - d.pivot.y, newPivot.z - d.pivot.z)
+      for (const [p, cf] of d.parts) p.set('CFrame', delta.mul(cf))
+    }
+
     const onMouseDown = (e: MouseEvent) => {
       dom.focus()
       if (e.button === 2) rmb = { x: e.clientX, y: e.clientY }
       if (e.button === 1) { mmb = { x: e.clientX, y: e.clientY }; e.preventDefault() }
-      if (e.button === 0 && !tc.dragging && (tc.axis === null || !helper.visible)) lmbDown = { x: e.clientX, y: e.clientY }
+      if (e.button === 0 && !tc.dragging && (tc.axis === null || !helper.visible)) {
+        lmbDown = { x: e.clientX, y: e.clientY }
+        if (!editor.playing) beginDragCandidate(e)
+      }
     }
+    let hoverQueued = false
     const onMouseMove = (e: MouseEvent) => {
+      if (drag) { updateDrag(e); return }
+      if (!rmb && !mmb && !tc.dragging && e.target === dom && !hoverQueued) {
+        hoverQueued = true
+        requestAnimationFrame(() => {
+          hoverQueued = false
+          if (editor.playing || tc.axis) { r.setHover(null); return }
+          const hit = r.pick(e.clientX, e.clientY, (i) => i.get<boolean>('Locked'))
+          r.setHover(selectable(hit?.inst ?? null, e.altKey))
+        })
+      }
       if (rmb) {
         cam.yaw -= (e.clientX - rmb.x) * 0.005
         cam.pitch = Math.max(-1.55, Math.min(1.55, cam.pitch - (e.clientY - rmb.y) * 0.005))
@@ -175,16 +255,18 @@ export function Viewport() {
     const onMouseUp = (e: MouseEvent) => {
       if (e.button === 2) rmb = null
       if (e.button === 1) mmb = null
+      if (e.button === 0 && drag) {
+        const wasActive = drag.active
+        drag = null
+        dom.style.cursor = ''
+        if (wasActive) { lmbDown = null; editor.emit(); return }
+      }
       if (e.button === 0 && lmbDown) {
         const moved = Math.hypot(e.clientX - lmbDown.x, e.clientY - lmbDown.y) > 4
         lmbDown = null
         if (moved || tc.dragging || editor.playing) return
         const hit = r.pick(e.clientX, e.clientY, (i) => i.get<boolean>('Locked'))
-        let target: Instance | null = hit?.inst ?? null
-        if (target && !e.altKey) {
-          // select the top-level model (like Studio)
-          for (let p = target.parent; p && p.className !== 'Workspace'; p = p.parent) if (p instanceof Model) target = p
-        }
+        const target = selectable(hit?.inst ?? null, e.altKey)
         if (e.ctrlKey || e.shiftKey) {
           if (!target) return
           const s = editor.selection
@@ -198,6 +280,26 @@ export function Viewport() {
       cam.pos.addScaledVector(fwd, -Math.sign(e.deltaY) * 4)
     }
     const onContext = (e: Event) => e.preventDefault()
+    const onLeave = () => r.setHover(null)
+    // drop files (import) or assets from the Assets panel into the world
+    const onDragOver = (e: DragEvent) => {
+      if (editor.playing || !e.dataTransfer) return
+      if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }
+    }
+    const onDrop = async (e: DragEvent) => {
+      if (editor.playing || !e.dataTransfer) return
+      e.preventDefault()
+      const hit = r.pick(e.clientX, e.clientY)
+      const at = hit
+        ? { part: hit.inst, point: new Vector3(hit.point.x, hit.point.y, hit.point.z), normal: new Vector3(hit.normal.x, hit.normal.y, hit.normal.z) }
+        : {}
+      const id = e.dataTransfer.getData(ASSET_DRAG_TYPE)
+      const list = id ? [assets.get(id)].filter((a) => !!a) : await importFiles([...e.dataTransfer.files])
+      for (const a of list) await insertAsset(a!, a!.kind === 'mesh' ? { point: at.point } : at)
+    }
+    dom.addEventListener('dragover', onDragOver)
+    dom.addEventListener('drop', onDrop)
+    dom.addEventListener('mouseleave', onLeave)
     dom.addEventListener('mousedown', onMouseDown)
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
@@ -235,7 +337,7 @@ export function Viewport() {
       <div ref={playRef} className="viewport-layer" style={{ visibility: ed.playing ? 'visible' : 'hidden' }} />
       {ed.starting && <div className="viewport-overlay">Starting…</div>}
       {!ed.playing && (
-        <div className="viewport-hint">RMB look · WASD/QE fly · Shift slow · F focus · Alt+click selects inside models</div>
+        <div className="viewport-hint">RMB look · WASD/QE fly · F focus · drag parts to move · Alt+click selects inside models · drop files to import</div>
       )}
     </div>
   )
