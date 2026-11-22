@@ -6,6 +6,7 @@ import {
   copySelection, cutSelection, deleteSelection, duplicateSelection, groupSelection, insertObject, paste, reparent, ungroupSelection,
 } from '../ops'
 import { ClassIcon } from './icons'
+import { languageOf } from '../../engine/scripting/languages'
 import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
 
 const expanded = new Set<number>()
@@ -146,7 +147,7 @@ export function Explorer() {
               <span className="tree-arrow" onClick={(e) => { e.stopPropagation(); if (hasChildren) toggle(inst) }}>
                 {hasChildren ? (expanded.has(inst.id) || filter ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
               </span>
-              <ClassIcon cls={inst.className} />
+              <ClassIcon cls={inst.className} lang={inst.isA('LuaSourceContainer') ? languageOf(inst) : undefined} />
               {renaming === inst ? (
                 <input
                   className="tree-rename"

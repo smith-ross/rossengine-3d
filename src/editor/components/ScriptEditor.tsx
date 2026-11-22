@@ -1,23 +1,48 @@
-// Monaco-based Luau script editor.
+// Monaco-based script editor for Luau, TypeScript and Python.
 import { useEffect, useRef } from 'react'
 import * as monaco from '../luau/monacoCore'
 import EditorWorker from '../../../node_modules/monaco-editor/esm/vs/editor/editor.worker.js?worker'
+import TsWorker from '../../../node_modules/monaco-editor/esm/vs/languages/features/typescript/ts.worker.js?worker'
 import { registerLuau } from '../luau/language'
 import { checkScript, complete, typeAt } from '../luau/analysis'
-import { Instance } from '../../engine/instance'
+import { Instance, allClasses } from '../../engine/instance'
+import { languageOf, ScriptLanguage } from '../../engine/scripting/languages'
+import {
+  MONACO_LANGUAGE, checkPython, loadPythonChecker, registerPythonCompletions, setupLanguages, syncTypeScriptWorkspace, uriFor,
+} from '../languages/setup'
 import { editor as store, useEditor } from '../store'
 
-;(self as any).MonacoEnvironment = { getWorker: () => new EditorWorker() }
+;(self as any).MonacoEnvironment = {
+  getWorker: (_id: string, label: string) => (label === 'typescript' || label === 'javascript' ? new TsWorker() : new EditorWorker()),
+}
 registerLuau()
+setupLanguages()
+registerPythonCompletions(() => {
+  const names = new Set<string>()
+  for (const c of allClasses()) {
+    for (const k of c.props.keys()) names.add(k)
+    for (const k of c.methods.keys()) names.add(k)
+    for (const k of c.events) names.add(k)
+  }
+  for (const k of ['Connect', 'Once', 'Wait', 'Disconnect', 'X', 'Y', 'Z', 'Magnitude', 'Unit', 'new', 'fromRGB', 'Angles', 'add', 'sub', 'mul', 'div', 'WaitForChild']) names.add(k)
+  return [...names].sort()
+})
 
 const models = new Map<Instance, monaco.editor.ITextModel>()
 const byUri = new Map<string, Instance>()
 
+/** One model per script; recreated if the script's language or (for TypeScript) its path changed. */
 function modelFor(script: Instance) {
+  const lang = languageOf(script)
+  const uriText = uriFor(script, lang)
   let m = models.get(script)
-  if (m && !m.isDisposed()) return m
-  const uri = monaco.Uri.parse(`inmemory://scripts/${script.id}.luau`)
-  m = monaco.editor.getModel(uri) ?? monaco.editor.createModel(script.get<string>('Source') ?? '', 'luau', uri)
+  if (m && !m.isDisposed()) {
+    if (m.uri.toString() === monaco.Uri.parse(uriText).toString() && m.getLanguageId() === MONACO_LANGUAGE[lang]) return m
+    byUri.delete(m.uri.toString())
+    m.dispose()
+  }
+  const uri = monaco.Uri.parse(uriText)
+  m = monaco.editor.getModel(uri) ?? monaco.editor.createModel(script.get<string>('Source') ?? '', MONACO_LANGUAGE[lang], uri)
   models.set(script, m)
   byUri.set(uri.toString(), script)
   return m
@@ -89,6 +114,7 @@ export function ScriptEditor({ script }: { script: Instance }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const readOnly = script.dataModel !== store.game
+  const lang: ScriptLanguage = languageOf(script)
 
   useEffect(() => {
     registerProviders()
@@ -123,11 +149,20 @@ export function ScriptEditor({ script }: { script: Instance }) {
   useEffect(() => {
     const e = editorRef.current
     if (!e) return
+    if (lang === 'TypeScript') syncTypeScriptWorkspace(script.dataModel ?? store.game, (s) => { modelFor(s) })
+    if (lang === 'Python') void loadPythonChecker().then(() => runCheck())
     const model = modelFor(script)
     if (e.getModel() !== model) e.setModel(model)
-    e.updateOptions({ readOnly })
+    e.updateOptions({ readOnly, insertSpaces: lang === 'Python', tabSize: 4 })
     let timer: number | null = null
     const runCheck = () => {
+      if (model.isDisposed()) return
+      if (lang === 'Python') {
+        const markers = checkPython(model.getValue())
+        if (markers) monaco.editor.setModelMarkers(model, 'python', markers)
+        return
+      }
+      if (lang !== 'Luau') return // TypeScript is checked by Monaco's TypeScript service
       void checkScript(script.id, model.getValue()).then((diags) => {
         if (!diags || model.isDisposed()) return
         monaco.editor.setModelMarkers(model, 'luau', diags.map((d) => ({
@@ -149,7 +184,7 @@ export function ScriptEditor({ script }: { script: Instance }) {
     })
     e.focus()
     return () => { sub.dispose(); if (timer) clearTimeout(timer) }
-  }, [script, readOnly])
+  }, [script, readOnly, lang])
 
   // jump to a line (from Output)
   useEffect(() => {

@@ -3,11 +3,12 @@ import { useSyncExternalStore } from 'react'
 import '../engine/classes'
 import { DataModel } from '../engine/classes'
 import { Instance, SerializedInstance, deserialize, serialize } from '../engine/instance'
-import { baseplatePlace, demoPlace } from '../engine/templates'
+import { baseplatePlace, demoPlace, languagesPlace } from '../engine/templates'
 import type { GameSession } from '../engine/game/GameSession'
 import type { OutputKind } from '../engine/luau/LuauRuntime'
 import { assets, SerializedAsset } from '../engine/assets'
 import { idbGet, idbSet } from './persist'
+import { DEFAULT_SOURCE, languageOf } from '../engine/scripting/languages'
 
 export type Tool = 'select' | 'move' | 'scale' | 'rotate'
 
@@ -121,8 +122,21 @@ class EditorStore {
         this.markDirty()
       },
       reparented: () => { this.structureVersion++; this.markDirty() },
-      changed: (_i, prop) => { if (prop === 'Name') this.structureVersion++; this.markDirty() },
+      changed: (inst, prop) => {
+        if (prop === 'Name') this.structureVersion++
+        if (prop === 'Language') this.swapTemplateSource(inst)
+        this.markDirty()
+      },
     })
+  }
+
+  /** Switching a script's language replaces an untouched starter source with the new language's. */
+  private swapTemplateSource(inst: Instance) {
+    const src = inst.get<string>('Source') ?? ''
+    const isTemplate = !src.trim() || Object.values(DEFAULT_SOURCE).some((d) => d.script === src || d.module === src)
+    if (!isTemplate) return
+    const lang = languageOf(inst)
+    inst.set('Source', DEFAULT_SOURCE[lang][inst.className === 'ModuleScript' ? 'module' : 'script'])
   }
 
   private markDirty() {
@@ -169,10 +183,10 @@ class EditorStore {
     this.log('system', `Opened "${this.placeName}"`)
   }
 
-  newPlace(template: 'baseplate' | 'demo') {
+  newPlace(template: 'baseplate' | 'demo' | 'languages') {
     if (this.playing) this.stop()
-    const g = template === 'demo' ? demoPlace() : baseplatePlace()
-    this.placeName = template === 'demo' ? 'Coin Collector' : 'Untitled'
+    const g = template === 'demo' ? demoPlace() : template === 'languages' ? languagesPlace() : baseplatePlace()
+    this.placeName = template === 'demo' ? 'Coin Collector' : template === 'languages' ? 'Languages Demo' : 'Untitled'
     assets.clear()
     this.showStart = false
     this.fileHandle = null

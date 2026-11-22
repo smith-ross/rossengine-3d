@@ -1,10 +1,10 @@
 # RossEngine 3D
 
-A Roblox-style 3D game engine that runs in the browser. Games are built in an in-browser editor and scripted **only in Luau**. They can be exported as standalone desktop apps (Electron).
+A Roblox-style 3D game engine that runs in the browser. Games are built in an in-browser editor and scripted in **Luau, TypeScript or Python 3**. Modules in any language can be imported from the others. Games can be exported as standalone desktop apps (Electron).
 
 - **Engine:** TypeScript, with [three.js](https://threejs.org) for rendering and [Rapier](https://rapier.rs) for physics.
-- **Scripting:** real Luau (compiled to WebAssembly through [`@luau-rs/luau`](https://github.com/luau-rs/luau)), with a Roblox-like API.
-- **Editor:** React UI with a Monaco script editor. The editor does Luau type checking, autocomplete and hover, driven by definitions generated from the engine.
+- **Scripting:** real Luau (compiled to WebAssembly through [`@luau-rs/luau`](https://github.com/luau-rs/luau)), TypeScript (transpiled with sucrase), and Python 3 ([Pyodide](https://pyodide.org)). All three use the same Roblox-like API.
+- **Editor:** React UI with a Monaco script editor. Luau and TypeScript get type checking, autocomplete and hover, driven by definitions generated from the engine. Python gets syntax checking.
 - **Player:** an Electron app that runs a saved place by itself.
 
 ## Quick start
@@ -23,7 +23,7 @@ Other scripts:
 | `npm run build:player` | Packages the player template (the first **Build** in the editor does this for you) |
 | `node tools/build-player.mjs my.rbe "My Game"` | Exports a saved place from the command line |
 | `npm run editor` | Builds the editor and serves it, including the build API |
-| `npm test` | Runs the Luau bridge and migration tests |
+| `npm test` | Runs the Luau bridge, migration and cross-language tests |
 | `npm run typecheck` | Runs the TypeScript checks |
 
 Runtime test page without the editor: `http://localhost:5173/player.html?demo`.
@@ -36,7 +36,8 @@ src/engine/            the engine (shared by the editor's Play mode and the play
   classes.ts           class library: Part, Model, Script, Humanoid, services, GUI, ...
   datatypes.ts         Vector3, CFrame, Color3, UDim2, Enum
   luau/prelude.luau    Roblox API written in Luau: Instance proxies, signals, task scheduler, datatypes
-  luau/LuauRuntime.ts  Luau VM host and the JS <-> Luau bridge
+  luau/LuauRuntime.ts  Luau VM host and the JS <-> Luau bridge (incl. live cross-language proxies)
+  scripting/           ScriptHost (JS API + module registry), TypeScript and Python runtimes
   physics/Physics.ts   Rapier world, Touched events, raycasts, welds
   render/              three.js scene mirror, materials, sky
   gui/GuiRenderer.ts   ScreenGui -> DOM overlay
@@ -68,7 +69,50 @@ Supported API includes:
 - **Parts:** physics and `Touched`, Humanoid characters (walking, jumping, death and respawn, `MoveTo`), ClickDetector, Sound, MeshPart, Decal, PointLight and SpotLight.
 - **GUI:** ScreenGui with Frame, TextLabel, TextButton, TextBox, ImageLabel, UICorner, UIStroke and UIListLayout.
 
-Scripts that loop without yielding are stopped after 8 seconds ("Script timeout").
+Scripts in any language that loop without yielding are stopped after 8 seconds ("Script timeout").
+
+## Languages
+
+Every Script and ModuleScript has a **Language** property: Luau, TypeScript or Python. Use **Script ▾** or **Module ▾** in the toolbar to create one in a given language. The **Languages Demo** template shows all three working together.
+
+```ts
+// TypeScript: same API; yielding uses await
+const part = Instance.new("Part", workspace)
+part.Position = new Vector3(0, 10, 0)
+part.Touched.Connect((hit) => print("touched by", hit.Name))
+await task.wait(1)
+```
+
+```python
+# Python: same API; top-level await is allowed
+part = Instance.new("Part")
+part.Size = Vector3.new(4, 1, 2)
+part.Parent = workspace
+await task.wait(1)
+```
+
+**Modules across languages.** A ModuleScript in any language can be loaded from any other:
+
+| From | Syntax |
+| --- | --- |
+| Luau | `require(game.Storage.Util)` or `require("Storage/Util")` |
+| TypeScript | `import { add } from "Storage/Util"`, `import Util from "./Util"`, or `require(...)` |
+| Python | `import Util`, `from Storage import Util`, or `require(script.Parent.Util)` |
+
+- **Paths:** relative paths start from the script's parent. A bare name like `"Util"` is looked up in Storage, then ScriptService.
+- **What gets shared:**
+  - A Luau module shares the value it returns.
+  - A TypeScript module shares its exports. If it only has `export default`, it shares that value.
+  - A Python module shares its namespace.
+- **Live values:** values pass between languages as live proxies, so tables, objects and functions (including callbacks) work across the boundary. Calling a foreign function from Luau works with either `.` or `:`.
+- **Arrays:** JS arrays are 1-based when indexed from Luau.
+- **Events:** `BindableEvent:Fire` reaches listeners in every language.
+
+**Differences from Luau:**
+- JS and Python have no operator overloading, so vector math uses methods: `a.add(b)`, `.sub`, `.mul`, `.div`, and `cf.Mul(other)` for `cf * other`.
+- Yielding is `await` (`await task.wait()`, `await part.WaitForChild("x")`), and `Signal.Wait()` resolves with the first argument.
+- Python modules can't be imported relatively (`from . import x`), and a module whose name matches a standard-library module has to be loaded with `require`.
+- Python (Pyodide, about 14 MB) loads only when a place contains Python scripts. It is bundled into exported games, so they run offline.
 
 ## Assets
 

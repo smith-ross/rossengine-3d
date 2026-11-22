@@ -4,7 +4,9 @@ import {
   MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { insertObject, insertPart, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { LANGUAGES, ScriptLanguage } from '../../engine/scripting/languages'
+import { ClassIcon } from './icons'
 import { openPlace, savePlace } from '../fileio'
 import { importFiles, insertAsset, pickFiles } from '../assetOps'
 import { InsertMenu } from './Explorer'
@@ -71,6 +73,7 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
             <div onClick={close}>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('baseplate')}><span><FilePlus size={13} /> New Baseplate</span></div>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}><span><FilePlus size={13} /> New from Demo</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('languages')}><span><FilePlus size={13} /> New Languages Demo</span></div>
               <div className="menu-sep" />
               <div className="menu-item" onClick={() => confirmDiscard() && openPlace()}><span><FolderOpen size={13} /> Open…</span><span className="menu-shortcut">Ctrl+O</span></div>
               <div className="menu-item" onClick={() => savePlace()}><span><Save size={13} /> Save</span><span className="menu-shortcut">Ctrl+S</span></div>
@@ -107,8 +110,12 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         </Drop>
         <Btn icon={<Shapes size={18} />} label="Model" disabled={playing} title="Import a 3D model file (.glb, .gltf, .obj, .fbx, .stl) as a MeshPart"
           onClick={async () => { for (const a of await importFiles(await pickFiles('mesh'))) await insertAsset(a) }} />
-        <Btn icon={<FileCode2 size={18} />} label="Script" disabled={playing} onClick={() => insertObject('Script')} title="Insert a Script" />
-        <Btn icon={<Braces size={18} />} label="Module" disabled={playing} onClick={() => insertObject('ModuleScript')} title="Insert a ModuleScript (load it with require)" />
+        <Drop icon={<FileCode2 size={18} />} label="Script" disabled={playing}>
+          {(close) => <LanguageMenu onPick={(l) => { insertScript('Script', l); close() }} />}
+        </Drop>
+        <Drop icon={<Braces size={18} />} label="Module" disabled={playing}>
+          {(close) => <LanguageMenu module onPick={(l) => { insertScript('ModuleScript', l); close() }} />}
+        </Drop>
         <Drop icon={<Plus size={18} />} label="Object" disabled={playing} wide>
           {(close) => <InsertMenu onDone={close} inline />}
         </Drop>
@@ -131,6 +138,25 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         )}
         <Btn icon={<Hammer size={18} />} label="Build" disabled={playing} onClick={onBuild} title="Build a standalone desktop app" />
       </Group_>
+    </div>
+  )
+}
+
+function LanguageMenu({ onPick, module }: { onPick: (l: ScriptLanguage) => void; module?: boolean }) {
+  const hint: Record<ScriptLanguage, string> = {
+    Luau: 'Roblox-style Luau',
+    TypeScript: 'typed, async/await',
+    Python: 'Python 3 (Pyodide)',
+  }
+  return (
+    <div>
+      <div className="menu-cat">{module ? 'New ModuleScript' : 'New Script'}</div>
+      {LANGUAGES.map((l) => (
+        <div key={l} className="menu-item" onClick={() => onPick(l)}>
+          <span><ClassIcon cls={module ? 'ModuleScript' : 'Script'} lang={l} /> {l}</span>
+          <span className="menu-shortcut">{hint[l]}</span>
+        </div>
+      ))}
     </div>
   )
 }

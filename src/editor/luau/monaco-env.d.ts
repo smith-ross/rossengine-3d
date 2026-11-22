@@ -10,3 +10,7 @@ declare module '*/editor.worker.js?worker' {
   const WorkerCtor: { new (): Worker }
   export default WorkerCtor
 }
+declare module '*/ts.worker.js?worker' {
+  const WorkerCtor: { new (): Worker }
+  export default WorkerCtor
+}

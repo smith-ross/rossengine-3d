@@ -168,3 +168,110 @@ export function demoPlace(): DataModel {
   make('Script', { Name: 'HudController', Source: HUD_CLIENT }, gui)
   return game
 }
+
+// ---- Multi-language sample ---------------------------------------------------------------
+const POLY_MAIN_LUAU = `-- Luau script that uses a TypeScript module and a Python module
+local Builder = require(game.Storage.Builder) -- TypeScript
+local Waves = require("Storage/Waves")        -- Python
+
+local columns = {}
+for i = 1, 8 do
+	local angle = i / 8 * math.pi * 2
+	local position = Vector3.new(math.cos(angle) * 18, 0, math.sin(angle) * 18)
+	table.insert(columns, Builder.column(position, Color3.fromHSV(i / 8, 0.7, 1)))
+end
+print(Builder.greeting, "-", #columns, "columns")
+
+game:GetService("RunService").Heartbeat:Connect(function()
+	local t = time()
+	for i, part in columns do
+		local p = part.Position
+		part.Position = Vector3.new(p.X, 3 + Waves.height(t, i), p.Z)
+	end
+end)
+`
+
+const POLY_BUILDER_TS = `// TypeScript ModuleScript, used from Luau (Main) and Python (Hud)
+export const greeting = "Built with TypeScript"
+
+export function column(position: Vector3, color: Color3): Part {
+	const part = Instance.new("Part")
+	part.Name = "Column"
+	part.Size = new Vector3(3, 6, 3)
+	part.Position = position.add(new Vector3(0, 3, 0))
+	part.Color = color
+	part.Material = Enum.Material.Neon
+	part.Anchored = true
+	part.Parent = workspace
+	return part
+}
+`
+
+const POLY_WAVES_PY = `# Python ModuleScript, used from Luau (Main)
+import math
+
+def height(t, i):
+    return math.sin(t * 2 + i * 0.8) * 2
+`
+
+const POLY_BUTTON_TS = `// TypeScript script: a clickable button that fires a BindableEvent
+const button = Instance.new("Part")
+button.Name = "Button"
+button.Size = new Vector3(4, 1, 4)
+button.Position = new Vector3(0, 0.5, -10)
+button.Color = Color3.fromRGB(255, 80, 80)
+button.Anchored = true
+button.Parent = workspace
+
+const detector = Instance.new("ClickDetector", button)
+const clicked = game.Storage.Clicked as BindableEvent
+let count = 0
+
+detector.MouseClick.Connect(async () => {
+	count++
+	clicked.Fire(count)
+	button.Size = new Vector3(4, 0.4, 4)
+	await task.wait(0.15)
+	button.Size = new Vector3(4, 1, 4)
+})
+`
+
+const POLY_HUD_PY = `# Python script: a GUI that reacts to the TypeScript button
+from Storage import Builder   # TypeScript module, imported from Python
+
+players = game.GetService("Players")
+player = players.LocalPlayer or await players.PlayerAdded.Wait()
+
+gui = Instance.new("ScreenGui")
+label = Instance.new("TextLabel")
+label.Size = UDim2.new(0, 440, 0, 44)
+label.Position = UDim2.new(0, 16, 0, 16)
+label.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+label.BackgroundTransparency = 0.25
+label.TextColor3 = Color3.fromRGB(255, 255, 255)
+label.TextSize = 20
+label.Text = f"{Builder.greeting} - click the red button!"
+label.Parent = gui
+gui.Parent = await player.WaitForChild("PlayerGui")
+
+def on_clicked(count):
+    label.Text = f"Button clicked {count} time{'' if count == 1 else 's'}"
+
+game.Storage.Clicked.Event.Connect(on_clicked)
+`
+
+export function languagesPlace(): DataModel {
+  const game = baseplatePlace()
+  game.name = 'Languages Demo'
+  const storage = game.getService('Storage')
+  const ss = game.getService('ScriptService')
+  const script = (cls: string, name: string, lang: string, source: string, parent: Instance) =>
+    make(cls, { Name: name, Language: enumItem('ScriptLanguage', lang), Source: source }, parent)
+  script('ModuleScript', 'Builder', 'TypeScript', POLY_BUILDER_TS, storage)
+  script('ModuleScript', 'Waves', 'Python', POLY_WAVES_PY, storage)
+  make('BindableEvent', { Name: 'Clicked' }, storage)
+  script('Script', 'Main', 'Luau', POLY_MAIN_LUAU, ss)
+  script('Script', 'Button', 'TypeScript', POLY_BUTTON_TS, ss)
+  script('Script', 'Hud', 'Python', POLY_HUD_PY, ss)
+  return game
+}

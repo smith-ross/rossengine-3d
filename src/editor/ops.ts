@@ -3,6 +3,20 @@ import { CFrame, Color3, Vector3, enumItem } from '../engine/datatypes'
 import { Instance, SerializedInstance, createInstance, deserialize, getClass, serialize } from '../engine/instance'
 import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
+import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
+
+/** Insert a Script or ModuleScript in the given language, with a starter source. */
+export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
+  return editor.mutate(() => {
+    const s = createInstance(cls)
+    s.set('Language', enumItem('ScriptLanguage', lang))
+    s.set('Source', DEFAULT_SOURCE[lang][cls === 'Script' ? 'script' : 'module'])
+    s.setParent(parent ?? defaultParentFor(cls))
+    editor.selection = [s]
+    editor.openScript(s)
+    return s
+  })
+}
 
 let clipboard: SerializedInstance[] = []
 /** Where new parts go: set by the viewport to the point in front of the camera. */

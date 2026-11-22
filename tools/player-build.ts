@@ -29,7 +29,7 @@ function newestSourceTime(): number {
     if (st.isDirectory()) for (const f of fs.readdirSync(p)) walk(path.join(p, f))
     else newest = Math.max(newest, st.mtimeMs)
   }
-  for (const p of ['src/engine', 'src/player', 'electron', 'player.html', 'vite.player.config.ts']) walk(path.join(ROOT, p))
+  for (const p of ['src/engine', 'src/player', 'electron', 'player.html', 'vite.player.config.ts', 'tools/pyodide-plugin.ts']) walk(path.join(ROOT, p))
   return newest
 }
 

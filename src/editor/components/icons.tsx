@@ -30,7 +30,13 @@ export function iconFor(cls: string): [LucideIcon, string] {
   return [Sparkles, '#9aa0aa']
 }
 
-export function ClassIcon({ cls, size = 14 }: { cls: string; size?: number }) {
+const LANG_BADGE: Record<string, [string, string]> = { TypeScript: ['TS', '#3b8eea'], Python: ['PY', '#e8b923'] }
+
+export function ClassIcon({ cls, size = 14, lang }: { cls: string; size?: number; lang?: string }) {
+  if (lang && LANG_BADGE[lang] && (cls === 'Script' || cls === 'ModuleScript')) {
+    const [text, color] = LANG_BADGE[lang]
+    return <span className={`lang-badge${cls === 'ModuleScript' ? ' module' : ''}`} style={{ background: color }} title={`${lang} ${cls}`}>{text}</span>
+  }
   const [Icon, color] = iconFor(cls)
   return <Icon className="class-icon" size={size} color={color} strokeWidth={2} />
 }

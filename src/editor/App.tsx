@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, FileCode2, FolderOpen, Globe, Package, Sparkles, Terminal, X } from 'lucide-react'
+import { Box, FileCode2, FolderOpen, Globe, Languages, Package, Sparkles, Terminal, X } from 'lucide-react'
 import { editor, useEditor } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Explorer } from './components/Explorer'
@@ -16,6 +16,7 @@ import {
 import { openPlace, savePlace } from './fileio'
 import { BasePart } from '../engine/classes'
 import { formatBytes } from './assetOps'
+import { EXTENSION, languageOf } from '../engine/scripting/languages'
 
 // ---- resizable layout ----------------------------------------------------------
 const LAYOUT_KEY = 'rossengine.layout'
@@ -73,7 +74,7 @@ export function App() {
             {ed.tabs.map((t) => (
               <div key={t.id} className={`tab${ed.activeTab === t ? ' active' : ''}`} onClick={() => { editor.activeTab = t; editor.emit() }}
                 onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); editor.closeTab(t) } }}>
-                <ClassIcon cls={t.className} size={13} /> {t.name}
+                <ClassIcon cls={t.className} size={13} lang={languageOf(t)} /> {t.name}<span className="tab-ext">.{EXTENSION[languageOf(t)]}</span>
                 <span className="tab-close" onClick={(e) => { e.stopPropagation(); editor.closeTab(t) }}><X size={12} /></span>
               </div>
             ))}
@@ -181,6 +182,7 @@ function StartScreen() {
           {hasContent && card(<Sparkles size={22} />, `Continue “${ed.placeName}”`, 'Pick up where you left off (autosaved in this browser).', () => { editor.showStart = false; editor.emit() })}
           {card(<Globe size={22} />, 'Baseplate', 'An empty world with a spawn point.', () => editor.newPlace('baseplate'))}
           {card(<FileCode2 size={22} />, 'Coin Collector', 'A small sample game with scripts, GUI, tweens and physics.', () => editor.newPlace('demo'))}
+          {card(<Languages size={22} />, 'Languages Demo', 'Luau, TypeScript and Python scripts that import each other.', () => editor.newPlace('languages'))}
           {card(<FolderOpen size={22} />, 'Open place…', 'Open a .rbe place file from disk.', () => void openPlace())}
         </div>
         <div className="start-tips">
