@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react'
 import '../engine/classes'
 import { DataModel } from '../engine/classes'
 import { Instance, SerializedInstance, deserialize, serialize } from '../engine/instance'
-import { baseplatePlace, demoPlace, languagesPlace } from '../engine/templates'
+import { baseplatePlace, demoPlace } from '../engine/templates'
 import { empty2DPlace, platformerPlace } from '../engine/templates2d'
 import type { GameSession } from '../engine/game/GameSession'
 import type { OutputKind } from '../engine/luau/LuauRuntime'
@@ -206,7 +206,7 @@ class EditorStore {
     this.log('system', `Opened "${this.placeName}"`)
   }
 
-  newPlace(template: 'baseplate' | 'demo' | 'languages' | '2d' | 'platformer') {
+  newPlace(template: 'baseplate' | 'demo' | '2d' | 'platformer') {
     if (this.playing) this.stop()
     if (template === '2d' || template === 'platformer') {
       // 2D templates generate their pixel-art assets, which is asynchronous
@@ -223,8 +223,8 @@ class EditorStore {
       })()
       return
     }
-    const g = template === 'demo' ? demoPlace() : template === 'languages' ? languagesPlace() : baseplatePlace()
-    this.placeName = template === 'demo' ? 'Coin Collector' : template === 'languages' ? 'Languages Demo' : 'Untitled'
+    const g = template === 'demo' ? demoPlace() : baseplatePlace()
+    this.placeName = template === 'demo' ? 'Coin Collector' : 'Untitled'
     assets.clear()
     this.showStart = false
     this.fileHandle = null

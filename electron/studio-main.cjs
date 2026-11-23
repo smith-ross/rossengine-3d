@@ -101,10 +101,9 @@ function buildMenu() {
       label: 'File',
       submenu: [
         item('New Baseplate', 'new-baseplate'),
-        item('New from Demo', 'new-demo'),
-        item('New Languages Demo', 'new-languages'),
         item('New 2D Place', 'new-2d'),
-        item('New 2D Platformer', 'new-platformer'),
+        item('New Sample: Coin Collector (3D)', 'new-demo'),
+        item('New Sample: Platformer (2D)', 'new-platformer'),
         { type: 'separator' },
         item('Open…', 'open', 'CmdOrCtrl+O'),
         item('Save', 'save', 'CmdOrCtrl+S'),

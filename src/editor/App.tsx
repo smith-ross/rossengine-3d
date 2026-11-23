@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, FileCode2, FolderOpen, Gamepad2, Globe, Languages, Package, Sparkles, Terminal, X } from 'lucide-react'
+import { Box, FileCode2, FolderOpen, Gamepad2, Globe, Package, Square, Sparkles, Terminal, X } from 'lucide-react'
 import { editor, useEditor } from './store'
 import { Toolbar } from './components/Toolbar'
 import { Explorer } from './components/Explorer'
@@ -74,7 +74,6 @@ export function App() {
     switch (id) {
       case 'new-baseplate': if (discardOk()) editor.newPlace('baseplate'); break
       case 'new-demo': if (discardOk()) editor.newPlace('demo'); break
-      case 'new-languages': if (discardOk()) editor.newPlace('languages'); break
       case 'new-platformer': if (discardOk()) editor.newPlace('platformer'); break
       case 'new-2d': if (discardOk()) editor.newPlace('2d'); break
       case 'open': if (discardOk()) void openPlace(); break
@@ -209,13 +208,13 @@ function StartScreen() {
   return (
     <div className="start">
       <div className="start-inner">
-        <div className="start-head"><Box size={28} /> <div><h1>RossEngine Studio</h1><p>Build 3D games in your browser and script them in Luau.</p></div></div>
+        <div className="start-head"><Box size={28} /> <div><h1>RossEngine Studio</h1><p>Build 3D and 2D games, scripted in Luau, TypeScript or Python.</p></div></div>
         <div className="start-grid">
           {hasContent && card(<Sparkles size={22} />, `Continue “${ed.placeName}”`, 'Pick up where you left off (autosaved in this browser).', () => { editor.showStart = false; editor.emit() })}
           {card(<Globe size={22} />, 'Baseplate', 'An empty world with a spawn point.', () => editor.newPlace('baseplate'))}
+          {card(<Square size={22} />, 'Empty 2D', 'A blank 2D world, ready for sprites and tile maps.', () => editor.newPlace('2d'))}
           {card(<FileCode2 size={22} />, 'Coin Collector', 'A small sample game with scripts, GUI, tweens and physics.', () => editor.newPlace('demo'))}
           {card(<Gamepad2 size={22} />, '2D Platformer', 'Tilemap level, animated sprites, coins and a camera that follows you.', () => editor.newPlace('platformer'))}
-          {card(<Languages size={22} />, 'Languages Demo', 'Luau, TypeScript and Python scripts that import each other.', () => editor.newPlace('languages'))}
           {card(<FolderOpen size={22} />, 'Open place…', 'Open a .rbe place file from disk.', () => void openPlace())}
         </div>
         <div className="start-tips">

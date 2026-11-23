@@ -73,10 +73,9 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
           {(close) => (
             <div onClick={close}>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('baseplate')}><span><FilePlus size={13} /> New Baseplate</span></div>
-              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}><span><FilePlus size={13} /> New from Demo</span></div>
-              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('languages')}><span><FilePlus size={13} /> New Languages Demo</span></div>
               <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('2d')}><span><FilePlus size={13} /> New 2D Place</span></div>
-              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('platformer')}><span><FilePlus size={13} /> New 2D Platformer</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('demo')}><span><FilePlus size={13} /> New Sample: Coin Collector (3D)</span></div>
+              <div className="menu-item" onClick={() => confirmDiscard() && editor.newPlace('platformer')}><span><FilePlus size={13} /> New Sample: Platformer (2D)</span></div>
               <div className="menu-sep" />
               <div className="menu-item" onClick={() => confirmDiscard() && openPlace()}><span><FolderOpen size={13} /> Open…</span><span className="menu-shortcut">Ctrl+O</span></div>
               <div className="menu-item" onClick={() => savePlace()}><span><Save size={13} /> Save</span><span className="menu-shortcut">Ctrl+S</span></div>

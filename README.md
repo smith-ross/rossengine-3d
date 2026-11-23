@@ -14,7 +14,7 @@ npm install
 npm run dev          # editor at http://localhost:5173
 ```
 
-The start screen offers a blank Baseplate or the Coin Collector demo. The editor autosaves to the browser (IndexedDB) and saves `.rbe` place files with **Ctrl+S**. Press **Play** (F5) to run it and **Stop** (Shift+F5) to return to editing. Press **Build** to export a desktop app. The app is written to `builds/<Name>-win32-x64/<Name>.exe`.
+The start screen offers a blank place (Baseplate for 3D, Empty 2D) or a small sample game to learn from (Coin Collector in 3D, Platformer in 2D). The editor autosaves to the browser (IndexedDB) and saves `.rbe` place files with **Ctrl+S**. Press **Play** (F5) to run it and **Stop** (Shift+F5) to return to editing. Press **Build** to export a desktop app. The app is written to `builds/<Name>-win32-x64/<Name>.exe`.
 
 Other scripts:
 
@@ -83,7 +83,7 @@ Scripts in any language that loop without yielding are stopped after 8 seconds (
 
 ## Languages
 
-Every Script and ModuleScript has a **Language** property: Luau, TypeScript or Python. Use **Script ▾** or **Module ▾** in the toolbar to create one in a given language. The **Languages Demo** template shows all three working together.
+Every Script and ModuleScript has a **Language** property: Luau, TypeScript or Python. Use **Script ▾** or **Module ▾** in the toolbar to create one in a given language. Modules written in any language can `require` (Luau/TypeScript) or `import` (Python) modules written in the others.
 
 ```ts
 // TypeScript: same API; yielding uses await
