@@ -8,7 +8,7 @@ import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFail
 import { Color3, EnumItem, Vector2 } from '../datatypes'
 import { Instance } from '../instance'
 import { DataModel } from '../classes'
-import { TileMap, Xform, apply, invert, isNode2D, localXform } from '../classes2d'
+import { TileMap, Xform, apply, invert, isNode2D, localXform, worldPosition as worldPositionOf } from '../classes2d'
 import { assets } from '../assets'
 
 const IDENTITY: Xform = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
@@ -79,6 +79,11 @@ export class Renderer2D {
   frameOverride = new Map<Instance, number>()
   showCollision = false
   showGrid = false
+  /** editor: outline what the game camera will show; `gameSize` is the game window (place settings) */
+  showCamera = true
+  gameSize = { w: 1280, h: 720 }
+  private cameraLines: THREE.Mesh | null = null
+  private cameraMask: THREE.Mesh | null = null
   gridSize = 16
   private views = new Map<Instance, View>()
   private overlay = new THREE.Group()
@@ -531,7 +536,65 @@ export class Renderer2D {
   setHover(inst: Instance | null) { this.hovered = inst }
 
   private selLines: THREE.LineSegments | null = null
+  /**
+   * Where the running game's camera will look: the current Camera2D (centred on what it follows,
+   * plus Offset), at its Zoom, over a window of gameSize. No Camera2D: the game's default view.
+   */
+  cameraView(): { x: number; y: number; w: number; h: number; zoom: number; camera: Instance | null; follow: Instance | null } {
+    const cam = this.world2d.get<Instance | null>('CurrentCamera')
+    const { w, h } = this.gameSize
+    if (!cam || cam.className !== 'Camera2D' || !cam.isDescendantOf(this.world2d)) return { x: 0, y: 0, w, h, zoom: 1, camera: null, follow: null }
+    const zoom = Math.max(0.05, cam.get<number>('Zoom') ?? 1)
+    const follow = cam.get<Instance | null>('Follow')
+    const at = follow && isNode2D(follow) && follow.isDescendantOf(this.world2d)
+      ? worldPos(this.nodes, follow).add(cam.get<Vector2>('Offset'))
+      : worldPos(this.nodes, cam)
+    return { x: at.x, y: at.y, w: w / zoom, h: h / zoom, zoom, camera: cam, follow: follow && isNode2D(follow) ? follow : null }
+  }
+
+  /** Editor: an outline of the game camera's view, with everything outside it dimmed. */
+  private updateCameraFrame() {
+    const show = this.opts.editor && this.showCamera
+    if (!show) {
+      if (this.cameraLines) this.cameraLines.visible = false
+      if (this.cameraMask) this.cameraMask.visible = false
+      return
+    }
+    const c = this.cameraView()
+    const l = c.x - c.w / 2, r = c.x + c.w / 2, t = c.y - c.h / 2, b = c.y + c.h / 2
+    if (!this.cameraLines) {
+      const mat = (color: number, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false, side: THREE.DoubleSide })
+      this.cameraLines = new THREE.Mesh(new THREE.BufferGeometry(), mat(0xffc94a, 1))
+      this.cameraLines.renderOrder = 1e9
+      this.overlay.add(this.cameraLines)
+      this.cameraMask = new THREE.Mesh(new THREE.BufferGeometry(), mat(0x000000, 0.35))
+      this.cameraMask.renderOrder = 1e9 - 1
+      this.overlay.add(this.cameraMask)
+    }
+    // y is flipped for three.js
+    const quad = (x0: number, y0: number, x1: number, y1: number) => [x0, -y0, 0, x1, -y0, 0, x1, -y1, 0, x0, -y0, 0, x1, -y1, 0, x0, -y1, 0]
+    // a border 2 screen pixels thick just outside the view, and a small cross at its centre
+    const px = 1 / Math.max(1e-6, this.view.zoom)
+    const bw = 2 * px, tick = 8 * px, cw = 1 * px
+    const border = [
+      ...quad(l - bw, t - bw, r + bw, t), ...quad(l - bw, b, r + bw, b + bw),
+      ...quad(l - bw, t, l, b), ...quad(r, t, r + bw, b),
+      ...quad(c.x - tick, c.y - cw, c.x + tick, c.y + cw), ...quad(c.x - cw, c.y - tick, c.x + cw, c.y + tick),
+    ]
+    this.cameraLines.geometry.setAttribute('position', new THREE.Float32BufferAttribute(border, 3))
+    this.cameraLines.visible = true
+    // dim everything outside the view: four quads around the rectangle, out past the editor's view
+    const { w, h } = this.size()
+    const ex = (w / this.view.zoom + Math.abs(this.view.x - c.x) * 2 + c.w) * 2
+    const ey = (h / this.view.zoom + Math.abs(this.view.y - c.y) * 2 + c.h) * 2
+    const L = c.x - ex, R = c.x + ex, T = c.y - ey, B = c.y + ey
+    const tris = [...quad(L, T, R, t), ...quad(L, b, R, B), ...quad(L, t, l, b), ...quad(r, t, R, b)]
+    this.cameraMask!.geometry.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3))
+    this.cameraMask!.visible = true
+  }
+
   private updateOverlay() {
+    this.updateCameraFrame()
     // grid
     if (this.opts.editor && this.showGrid) {
       const g = this.gridSize * (this.view.zoom * this.gridSize < 6 ? 4 : 1)
@@ -620,4 +683,10 @@ export class Renderer2D {
     }
     return null
   }
+}
+
+/** A node's world position from the latest traversal (falls back to the transform helpers). */
+function worldPos(nodes: Map<Instance, Xform>, n: Instance): Vector2 {
+  const m = nodes.get(n)
+  return m ? new Vector2(m.tx, m.ty) : worldPositionOf(n)
 }

@@ -399,3 +399,4 @@ select.prop-input { background: var(--panel); }
 .anim-playhead::before { content: ''; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: #ff6b6b; }
 .anim-end { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-2); pointer-events: none; }
 .anim-nth { color: var(--muted); font-size: 10px; }
+.vp2d-camlabel { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; white-space: nowrap; font-size: 11px; color: #1d1608; background: #ffc94a; padding: 1px 6px; border-radius: 3px; }

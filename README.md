@@ -174,6 +174,7 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 - pan with the middle or right mouse button (or Space+drag) and zoom with the wheel;
 - drag objects to move them (they snap to the Move snap, in pixels) and drop images in to create sprites;
 - grid and collision-shape overlays can be toggled on;
+- **camera frame:** an amber outline shows exactly what the game will see when it starts. It covers the current `Camera2D` (centred on what it follows, plus `Offset`, at its `Zoom`) over the game window size from the place settings, and everything outside it is dimmed. The label names the camera, and the camera button in the viewport's corner toggles the frame;
 - sprite animations play live in the editor;
 - select a **TileMap** to paint with the tile palette: left click paints, right click erases, Shift+drag fills a rectangle;
 - **auto-tiling:** in the palette, click **+ Terrain** with the top-left tile of a block selected, then pick the terrain as the brush. Painting, erasing and rectangles then choose edge and corner tiles automatically. **Re-tile map** refreshes everything after you change a terrain's `Tiles`;

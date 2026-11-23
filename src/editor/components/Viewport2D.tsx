@@ -1,6 +1,6 @@
 // 2D edit viewport: pan/zoom, select & drag nodes, paint tiles, preview sprite animations.
 import { useEffect, useRef, useState } from 'react'
-import { Brush, Eraser, Grid3x3, Shapes, SquareDashed } from 'lucide-react'
+import { Brush, Eraser, Grid3x3, Shapes, SquareDashed, Video } from 'lucide-react'
 import { EnumItem, Vector2, enumItem } from '../../engine/datatypes'
 import { Instance, createInstance } from '../../engine/instance'
 import { TileMap, isNode2D, setWorldPosition, worldPosition } from '../../engine/classes2d'
@@ -15,7 +15,7 @@ import { ASSET_DRAG_TYPE } from './AssetsPanel'
 /** editor 2D camera, kept across rebuilds */
 export const view2d = { x: 0, y: 0, zoom: 2 }
 export const tileTool = { tile: 0, mode: 'paint' as 'paint' | 'erase' | 'rect', terrain: null as string | null }
-const overlays = { grid: true, collision: true }
+const overlays = { grid: true, collision: true, camera: true }
 
 /** pick the thing users mean: the physics body (or top-level node) rather than its sprite */
 function selectable(hit: Instance | null, exact: boolean): Instance | null {
@@ -28,6 +28,8 @@ export function Viewport2D() {
   const ed = useEditor()
   const hostRef = useRef<HTMLDivElement>(null)
   const rRef = useRef<Renderer2D | null>(null)
+  const camLabelRef = useRef<HTMLDivElement>(null)
+  const zoomRef = useRef<HTMLSpanElement>(null)
   const [, force] = useState(0)
   const game = ed.game
   const selectedMap = ed.selection.length === 1 && ed.selection[0] instanceof TileMap ? (ed.selection[0] as TileMap) : null
@@ -38,6 +40,7 @@ export function Viewport2D() {
     rRef.current = r
     r.showGrid = overlays.grid
     r.showCollision = overlays.collision
+    r.showCamera = overlays.camera
     const gui = new GuiRenderer(el)
     gui.interactive = false
     gui.root.style.zIndex = '2'
@@ -47,6 +50,26 @@ export function Viewport2D() {
 
     r.onBeforeRender = (dt) => {
       r.view = { ...view2d }
+      const zoomText = `${Math.round(view2d.zoom * 100)}%`
+      if (zoomRef.current && zoomRef.current.textContent !== zoomText) zoomRef.current.textContent = zoomText
+      r.gameSize = { w: editor.settings.width || 1280, h: editor.settings.height || 720 }
+      // label the game camera's view (top-left of its outline)
+      const label = camLabelRef.current
+      if (label) {
+        if (!r.showCamera || editor.playing) label.style.display = 'none'
+        else {
+          const c = r.cameraView()
+          const p = r.worldToViewport(new Vector2(c.x - c.w / 2, c.y - c.h / 2))
+          label.style.display = ''
+          // above the frame's corner, kept clear of the viewport's top-left buttons (inside the frame if need be)
+          let y = p.y - 22
+          if (y < 36) y = Math.max(36, p.y + 6)
+          label.style.transform = `translate(${Math.round(Math.max(4, p.x))}px, ${Math.round(y)}px)`
+          const what = c.camera ? `${c.camera.name}${c.follow ? ` (follows ${c.follow.name})` : ''}` : 'Default view (no Camera2D)'
+          const text = `${what} · ${r.gameSize.w}×${r.gameSize.h} at ${+c.zoom.toFixed(2)}×`
+          if (label.textContent !== text) label.textContent = text
+        }
+      }
       r.gridSize = editor.snap > 1 ? editor.snap : (editor.selection[0] instanceof TileMap ? (editor.selection[0] as TileMap).get<Vector2>('TileSize').x : 16)
       r.setSelection(editor.selection)
       animator.update(dt, r.drawList.map((v) => v.inst), (inst, frame) => r.frameOverride.set(inst, frame))
@@ -207,17 +230,19 @@ export function Viewport2D() {
 
   const toggle = (k: keyof typeof overlays) => {
     overlays[k] = !overlays[k]
-    if (rRef.current) { rRef.current.showGrid = overlays.grid; rRef.current.showCollision = overlays.collision }
+    if (rRef.current) { rRef.current.showGrid = overlays.grid; rRef.current.showCollision = overlays.collision; rRef.current.showCamera = overlays.camera }
     force((x) => x + 1)
   }
 
   return (
     <div className="viewport">
       <div ref={hostRef} className="viewport-layer" />
+      <div ref={camLabelRef} className="vp2d-camlabel" />
       <div className="vp2d-bar">
         <button className={overlays.grid ? 'on' : ''} onClick={() => toggle('grid')} title="Show grid"><Grid3x3 size={14} /></button>
         <button className={overlays.collision ? 'on' : ''} onClick={() => toggle('collision')} title="Show collision shapes"><Shapes size={14} /></button>
-        <span className="vp2d-zoom">{Math.round(view2d.zoom * 100)}%</span>
+        <button className={overlays.camera ? 'on' : ''} onClick={() => toggle('camera')} title="Show what the game camera sees"><Video size={14} /></button>
+        <span ref={zoomRef} className="vp2d-zoom">{Math.round(view2d.zoom * 100)}%</span>
       </div>
       {selectedMap && <TilePalette map={selectedMap} />}
       <div className="viewport-hint">
