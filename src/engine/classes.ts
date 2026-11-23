@@ -387,6 +387,8 @@ defineClass(Shader, {
   name: 'Shader', superclass: 'Instance', category: 'Rendering',
   props: {
     Source: { type: 'string', hidden: true, default: () => DEFAULT_SHADER_SOURCE },
+    /** visual steps (JSON); when set, Source is generated from it */
+    Recipe: { type: 'string', hidden: true },
     Enabled: { type: 'bool', default: () => true, category: 'Shader' },
     Transparent: { type: 'bool', category: 'Shader' },
   },
@@ -397,6 +399,7 @@ defineClass(ScreenShader, {
   name: 'ScreenShader', superclass: 'Instance', category: 'Rendering',
   props: {
     Source: { type: 'string', hidden: true, default: () => DEFAULT_SCREEN_SHADER_SOURCE },
+    Recipe: { type: 'string', hidden: true },
     Enabled: { type: 'bool', default: () => true, category: 'Shader' },
   },
 })

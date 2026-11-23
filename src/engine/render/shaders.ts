@@ -179,7 +179,7 @@ ${inc('\t#include <tonemapping_fragment>\n\t#include <colorspace_fragment>')}
 
 // ------------------------------------------------------------------ materials
 /** Live uniforms every shader material gets (values are refreshed each frame by the renderer). */
-function baseUniforms(kind: ShaderKind): Record<string, THREE.IUniform> {
+export function baseUniforms(kind: ShaderKind): Record<string, THREE.IUniform> {
   const u: Record<string, THREE.IUniform> = { SHADER_TIME: { value: 0 }, RESOLUTION: { value: new THREE.Vector2(1, 1) } }
   if (kind === 'screen') { u.TEXTURE = { value: null }; return u }
   Object.assign(u, {

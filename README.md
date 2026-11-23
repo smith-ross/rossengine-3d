@@ -155,7 +155,40 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 
 ## Shaders
 
-Custom GLSL, edited in the code editor with highlighting, completions and live error checking.
+There are two ways to make a shader:
+- **Visual steps** (the default for new shaders): no shader knowledge needed.
+- **GLSL code**: edited in the code editor with highlighting, completions and live error checking.
+
+### Visual steps
+
+A new Shader or ScreenShader opens as a list of plain-English steps that run from top to bottom. Each step is a sentence with controls inside it, for example:
+- "Paint **[blue]** in **[stripes]**, size **[1]**, moving at speed **[0.5]** going **[up]**"
+- "Glow **[cyan]** around the edges at strength **[2]**"
+- "Wobble the surface by **[20%]** at speed **[2]**"
+
+Using it:
+- **Add steps** with **Add a step**: search or browse by what they do.
+- **Rearrange** steps by dragging, switch one off with the eye, or delete it.
+- **Live preview:** shows a ball (3D), the sprite itself (2D), or a sample picture (screen effects). The object in the scene updates too.
+
+| Category | Steps |
+| --- | --- |
+| Colour | tint, paint a pattern, brighter/darker, contrast, more/less colourful, black and white, old photo, invert, rainbow, cartoon colours, pulse, flash |
+| Light & glow | glow, edge glow (3D), shiny (3D), sprite outline (2D) |
+| See-through | see-through, cut holes, dissolve (with a glowing edge; can animate itself) |
+| Movement | wobble, wave like a flag (3D), sway, bob, grow and shrink, spin |
+| Image | slide the image, wavy image |
+| Screen effects | dark corners, old TV lines, film grain, blur, colour split, cinema bars, pixelate, shake |
+
+Patterns are everywhere, stripes, waves, checkers, dots, clouds, sparkles, a fade, the edges, and the middle. They have a size, a speed and a direction.
+
+Other details:
+- **3D shaders** have a "Light it with the sun" switch.
+- **Show the code** displays the generated GLSL, commented step by step.
+- **Convert to code…** turns the shader into ordinary GLSL to keep editing by hand (Undo brings the steps back).
+
+### GLSL code
+
 
 - **Shader:** put it inside a 3D part (including MeshParts), or inside a Sprite2D, AnimatedSprite2D, TileMap or Text2D. It replaces that object's material.
 - **ScreenShader:** post-processing for the whole screen. Put it in **Lighting** (3D) or **World2D** (2D). Several screen shaders run in order.

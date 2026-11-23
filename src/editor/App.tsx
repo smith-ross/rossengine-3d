@@ -8,6 +8,10 @@ import { Viewport } from './components/Viewport'
 import { Output } from './components/Output'
 import { AssetsPanel, useAssets } from './components/AssetsPanel'
 import { ScriptEditor } from './components/ScriptEditor'
+import { VisualShaderEditor } from './shaders/VisualShaderEditor'
+
+/** a Shader/ScreenShader made of visual steps (rather than GLSL) */
+const isVisualShader = (i: { className: string; get: <T>(k: string) => T }) => (i.className === 'Shader' || i.className === 'ScreenShader') && !!i.get<string>('Recipe')
 import { BuildDialog } from './components/BuildDialog'
 import { ClassIcon } from './components/icons'
 import {
@@ -99,14 +103,14 @@ export function App() {
             {ed.tabs.map((t) => (
               <div key={t.id} className={`tab${ed.activeTab === t ? ' active' : ''}`} onClick={() => { editor.activeTab = t; editor.emit() }}
                 onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); editor.closeTab(t) } }}>
-                <ClassIcon cls={t.className} size={13} lang={languageOf(t)} /> {t.name}<span className="tab-ext">.{t.className === 'Shader' || t.className === 'ScreenShader' ? 'glsl' : EXTENSION[languageOf(t)]}</span>
+                <ClassIcon cls={t.className} size={13} lang={languageOf(t)} /> {t.name}<span className="tab-ext">.{isVisualShader(t) ? 'steps' : t.className === 'Shader' || t.className === 'ScreenShader' ? 'glsl' : EXTENSION[languageOf(t)]}</span>
                 <span className="tab-close" onClick={(e) => { e.stopPropagation(); editor.closeTab(t) }}><X size={12} /></span>
               </div>
             ))}
           </div>
           <div className="center-body">
             <Viewport />
-            {ed.activeTab && <div className="script-layer"><ScriptEditor script={ed.activeTab} /></div>}
+            {ed.activeTab && <div className="script-layer">{isVisualShader(ed.activeTab) ? <VisualShaderEditor shader={ed.activeTab} /> : <ScriptEditor script={ed.activeTab} />}</div>}
             {ed.showStart && !ed.playing && <StartScreen />}
           </div>
           <Splitter dir="y" onDrag={(d) => setLayout((l) => ({ ...l, bottom: clamp(l.bottom - d, 60, window.innerHeight * 0.7) }))} />

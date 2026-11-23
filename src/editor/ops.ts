@@ -5,7 +5,7 @@ import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
 import { view2d } from './components/Viewport2D'
 import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
-import { DEFAULT_SHADER_SOURCE_2D } from '../engine/shaderDefaults'
+import { compileRecipe, defaultRecipe } from '../engine/shaderRecipe'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
 export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
@@ -91,7 +91,15 @@ export function insertObject(className: string, parent?: Instance): Instance {
       }
     }
     inst.setParent(parent ?? defaultParentFor(className))
-    if (className === 'Shader' && inst.parent && /2D$|^TileMap$/.test(inst.parent.className)) inst.set('Source', DEFAULT_SHADER_SOURCE_2D)
+    if (className === 'Shader' || className === 'ScreenShader') {
+      // new shaders start as visual steps (no GLSL knowledge needed); "Convert to code" switches to GLSL
+      const kind = className === 'ScreenShader' ? 'screen' : inst.parent && /2D$|^TileMap$/.test(inst.parent.className) ? '2d' : '3d'
+      const recipe = defaultRecipe(kind)
+      const compiled = compileRecipe(recipe, kind)
+      inst.set('Recipe', JSON.stringify(recipe))
+      inst.set('Source', compiled.source)
+      if (className === 'Shader') inst.set('Transparent', compiled.transparent)
+    }
     editor.selection = [inst]
     if (isCode(inst)) editor.openScript(inst)
     return inst
