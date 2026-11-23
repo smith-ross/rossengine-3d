@@ -453,10 +453,21 @@ defineClass(WedgePart, { name: 'WedgePart', superclass: 'BasePart', category: 'P
  * capsule (fitted to Size) that slides along walls, climbs steps and slopes, and is never pushed
  * around by physics. Parts inside it or welded to it (e.g. a character mesh) move with it.
  */
-export class CharacterBody3D extends BasePart {}
+export class CharacterBody3D extends BasePart {
+  protected override onPropChanged(prop: string, old?: unknown) {
+    super.onPropChanged(prop)
+    if (prop === 'SeatPart') {
+      const seat = this.get<Instance | null>('SeatPart')
+      if (old) this.fire('Seated', false, old)
+      if (seat) this.fire('Seated', true, seat)
+    }
+  }
+}
 defineClass(CharacterBody3D, {
   name: 'CharacterBody3D', superclass: 'BasePart', category: 'Parts',
   props: {
+    /** sitting: rides on this part (MoveAndSlide does nothing) until it's set to nil */
+    SeatPart: { type: 'Instance', noSave: true, category: 'Character' },
     Velocity: { type: 'Vector3', default: () => new Vector3(0, 0, 0), category: 'Character' },
     UseGravity: { type: 'bool', default: () => true, category: 'Character' },
     /** steepest slope (degrees) it can walk up */
@@ -471,6 +482,7 @@ defineClass(CharacterBody3D, {
     IsOnCeiling: (self: Instance) => rt(self).bodyState3D(self).ceiling,
     GetFloorNormal: (self: Instance) => rt(self).bodyState3D(self).floorNormal,
   },
+  events: ['Seated'],
 })
 class SpawnLocation extends Part {}
 defineClass(SpawnLocation, {

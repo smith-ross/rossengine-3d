@@ -221,17 +221,23 @@ These are built from ordinary parts, joints and scripts, not special classes. Th
 - **Wheels:** each wheel turns on a `HingeConstraint` in `Motor` mode. It's attached to an invisible hub.
 - **Suspension:** each hub slides up and down on a `SliderConstraint`, held up by a `SpringConstraint`.
 - **Steering:** the front hubs turn on `Servo` hinges.
-- **Getting in and out:** walk into the car to get in, then drive with **W/S** and steer with **A/D**. **Space** gets you out.
+- **Getting in and out:** walk into the car to get in, then drive with **W/S** and steer with **A/D**. **Space** gets you out. This works for Humanoid characters and for `CharacterBody3D` ones.
 - **Scripts:** the car's `Seat` Script seats whoever touches it. The `Drive` LocalScript sets the wheels' `Speed` / `MaxTorque` and the steering hinges' `TargetAngle` from the keys.
 - **Tuning:** use the car model's attributes: `MaxSpeed`, `ReverseSpeed`, `Torque`, `BrakeTorque`, `SteerAngle` and `SteerSpeed`.
 - **Multiplayer:** the driver's machine runs the car while they're in it. The `Seat` script uses `SetNetworkOwner` for this.
 
 **Ragdoll script:** adds a `Ragdoll` Script to ScriptService. When any character dies (a player's or an NPC's), it joins the limbs to the torso. Legs and the head get limited hinges and the arms get ball sockets. The body then flops over instead of falling apart.
 
-**Sitting:** any part can be a seat. Set a Humanoid's `SeatPart`, or call `humanoid:Sit(part)`.
+**Sitting:** any part can be a seat. Set a Humanoid's `SeatPart`, or call `humanoid:Sit(part)`. A `CharacterBody3D` has its own `SeatPart` too, so characters without a Humanoid can sit; see below.
 - The character sits on top of the part and rides along with it. It doesn't push the part around.
 - **Space** stands it up beside the seat: on its left, or wherever the seat's `ExitOffset` attribute (a Vector3 in the seat's own space) says.
 - `Seated(active, seat)` fires both ways, and `humanoid:Sit(nil)` stands it up.
+- **`CharacterBody3D`:** set `body.SeatPart` to sit it on top of the part, facing the same way. While seated:
+  - it rides along, even if a script turns or moves it;
+  - it pushes nothing;
+  - `MoveAndSlide()` does nothing.
+
+  Set `SeatPart` to nil to stand it up beside the seat, at the bottom of the body. It doesn't stand up on Space by itself, but the car's `Drive` script does that for its driver. In your controller script, skip walking while `body.SeatPart` is set, e.g. play a sitting animation and return.
 
 ## Shaders
 

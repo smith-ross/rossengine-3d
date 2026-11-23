@@ -103,4 +103,34 @@ describe('car kit', () => {
     expect(out.x).toBeLessThan(-3.5) // standing on the car's left (the seat's ExitOffset)
     expect(Math.abs(out.y)).toBeLessThan(2)
   })
+
+  it('a CharacterBody3D (no Humanoid) sits, rides along and gets out the same way', () => {
+    const { game, car, chassis, physics, drive, run } = scene()
+    const body = createInstance('CharacterBody3D') as BasePart
+    body.set('Size', new Vector3(2, 5, 2))
+    body.set('CFrame', new CFrame(-12, 3, 0))
+    body.setParent(game.workspace)
+    const look = createInstance('Part') as BasePart // something inside it, riding along
+    look.set('Size', new Vector3(1, 1, 1))
+    look.set('CFrame', new CFrame(-12, 5, 0))
+    look.setParent(body)
+    run(0.5)
+    const seat = car.findFirstChild('DriverSeat') as BasePart
+    body.set('SeatPart', seat)
+    run(0.5)
+    const onSeat = () => seat.cframe.PointToObjectSpace(body.cframe.position)
+    expect(onSeat().x).toBeCloseTo(0, 1)
+    expect(onSeat().y).toBeCloseTo(0.3 + 2.5, 1) // bottom of the body on top of the seat
+    expect(chassis.cframe.upVector.y).toBeGreaterThan(0.99) // not shoving the car
+    run(2, () => drive(1, 0))
+    expect(chassis.cframe.position.z).toBeLessThan(-30)
+    expect(onSeat().magnitude).toBeLessThan(3) // rode along
+    expect(look.cframe.position.sub(body.cframe.position).magnitude).toBeCloseTo(2, 1) // and so did what's inside it
+    expect(physics.moveAndSlide(body, 1 / 60).magnitude).toBe(0) // MoveAndSlide does nothing while seated
+    run(2, () => drive(0, 0))
+    body.set('SeatPart', null)
+    run(0.1)
+    const out = chassis.cframe.PointToObjectSpace(body.cframe.position)
+    expect(out.x).toBeLessThan(-3.5) // on the car's left (the seat's ExitOffset)
+  })
 })

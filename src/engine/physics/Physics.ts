@@ -52,6 +52,8 @@ export class Physics {
   /** pairs currently touching, to avoid duplicate Touched events */
   private touching = new Map<string, number>()
   private chars = new Map<BasePart, CharBody>()
+  /** CharacterBody3Ds sitting on something (their SeatPart) */
+  private seated = new Map<BasePart, BasePart>()
   /** the set of parts riding on character bodies may have changed */
   private followersDirty = false
   /**
@@ -145,6 +147,9 @@ export class Physics {
         case 'MaxSlopeAngle': case 'MaxStepHeight':
           this.dirty.add(inst)
           break
+        case 'SeatPart':
+          if (isCharacterBody(inst)) this.seatChanged(inst)
+          break
       }
     } else if (isConstraint(inst)) {
       if (this.inWorkspace(inst)) this.constraints.changed(inst, prop)
@@ -217,7 +222,8 @@ export class Physics {
     const cdesc = role === 'root' || role === 'rider' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0)
       : character ? characterCapsule(part) : this.shapeFor(part)
     const canCollide = part.get<boolean>('CanCollide')
-    if (role === 'limb' || role === 'rider' || (!canCollide && role !== 'root')) cdesc.setSensor(true)
+    // (a CharacterBody3D in a seat pushes nothing, so it doesn't shove what it sits on)
+    if (role === 'limb' || role === 'rider' || (!canCollide && role !== 'root') || (character && this.seated.has(part))) cdesc.setSensor(true)
     cdesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
     cdesc.setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
     cdesc.setFriction(0.5).setRestitution(0)
@@ -291,9 +297,61 @@ export class Physics {
     }
   }
 
+  /** A CharacterBody3D's SeatPart changed: sit down, or stand up beside the seat it was on. */
+  private seatChanged(body: BasePart) {
+    const want = body.get<Instance | null>('SeatPart')
+    const old = this.seated.get(body)
+    const seat = want instanceof BasePart && !want.destroyed && this.inWorkspace(want) && want !== body ? want : null
+    if (seat === (old ?? null)) return
+    if (seat) this.seated.set(body, seat)
+    else this.seated.delete(body)
+    if (!seat && old && !old.destroyed) {
+      // stand up on the seat's left (or where its ExitOffset attribute says): the bottom of the body there
+      const exit = old.attributes.get('ExitOffset')
+      const at = old.cframe.mul(exit instanceof Vector3 ? CFrame.fromPosition(exit) : new CFrame(-(old.size.x / 2 + body.size.x / 2 + 1), 1, 0)).position
+      const look = old.cframe.lookVector
+      const flat = new Vector3(look.x, 0, look.z)
+      const pos = at.add(new Vector3(0, body.size.y / 2, 0))
+      const cf = flat.magnitude > 1e-3 ? CFrame.lookAt(pos, pos.add(flat)) : CFrame.fromPosition(pos)
+      this.writing = true
+      try { body.set('CFrame', cf); body.set('Velocity', Vector3.zero) } finally { this.writing = false }
+    }
+    this.dirty.add(body) // its collider: a sensor while seated
+    this.flushDirty()
+    if (seat) this.rideSeats()
+    else this.moveFollowers(body)
+  }
+
+  /**
+   * Seated CharacterBody3Ds move with their seats (sitting on top, facing the same way). Run after each
+   * physics step, and again after scripts' Heartbeat so a script turning or moving the body can't knock it off.
+   */
+  rideSeats() {
+    if (!this.seated.size) return
+    for (const [body, seat] of this.seated) {
+      if (body.destroyed || seat.destroyed || !this.inWorkspace(seat) || body.get('SeatPart') !== seat) {
+        this.seated.delete(body)
+        if (!body.destroyed && body.get('SeatPart') === seat) body.set('SeatPart', null)
+        continue
+      }
+      const cf = seat.cframe.mul(new CFrame(0, seat.size.y / 2 + body.size.y / 2, 0))
+      this.writing = true
+      try { body.set('CFrame', cf); if (!body.get<Vector3>('Velocity').equals(Vector3.zero)) body.set('Velocity', Vector3.zero) } finally { this.writing = false }
+      const b = this.bodies.get(body)
+      if (b) { b.rb.setTranslation({ x: cf.x, y: cf.y, z: cf.z }, true); b.rb.setRotation(cf.toQuaternion(), true) }
+      this.moveFollowers(body)
+    }
+  }
+
   /** CharacterBody3D:MoveAndSlide(): move by Velocity * dt, sliding along what it hits. */
   moveAndSlide(part: BasePart, dt: number): Vector3 {
     this.flushDirty()
+    if (this.seated.has(part)) {
+      // sitting: the seat carries it
+      const c = this.chars.get(part)
+      if (c) c.state = { floor: true, wall: false, ceiling: false, floorNormal: new Vector3(0, 1, 0) }
+      return Vector3.zero
+    }
     let v = part.get<Vector3>('Velocity')
     const b = this.bodies.get(part), c = this.chars.get(part)
     if (!b || !c || !(dt > 0)) return v
@@ -416,6 +474,7 @@ export class Physics {
       this.drainEvents()
     }
     if (steps) this.writeBack()
+    if (steps && this.seated.size) this.rideSeats()
     return steps
   }
 

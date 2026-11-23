@@ -106,14 +106,24 @@ export function buildCar(origin: CFrame, opts: CarOptions = {}): Instance {
 
 /** Host side: whoever touches the seat sits down, and the driver's machine gets to run the car. */
 export const CAR_SEAT_SOURCE = `-- Walk into the car to get in (you sit in the DriverSeat); press Space to get out.
+-- Works for Humanoid characters and for CharacterBody3D ones (both have a SeatPart).
 -- You get out where the seat's ExitOffset attribute says (in the seat's own space).
 -- In multiplayer the driver's machine runs the car, so it reacts to them straight away.
 local Players = game:GetService("Players")
 local car = script.Parent
 local seat = car:WaitForChild("DriverSeat")
 
-local driver = nil -- the Humanoid in the seat
-local justLeft = {} -- [humanoid] = time, so getting out doesn't sit you straight back down
+local driver = nil -- the Humanoid or CharacterBody3D in the seat
+local justLeft = {} -- [driver] = time, so getting out doesn't sit you straight back down
+
+-- what sits down when this part touches the car: a Humanoid, or a CharacterBody3D (or nothing)
+local function sitterOf(hit)
+	local body = if hit:IsA("CharacterBody3D") then hit else hit:FindFirstAncestorWhichIsA("CharacterBody3D")
+	if body then return body, body end
+	local humanoid = hit.Parent and hit.Parent:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then return humanoid, humanoid.Parent end
+	return nil
+end
 
 local function getOut()
 	if not driver then return end
@@ -123,20 +133,20 @@ local function getOut()
 end
 
 local function touched(hit)
-	if driver or not hit.Parent then return end
-	local humanoid = hit.Parent:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 or humanoid.SeatPart then return end
-	if justLeft[humanoid] and os.clock() - justLeft[humanoid] < 1.5 then return end
-	driver = humanoid
-	humanoid:Sit(seat)
-	local player = Players:GetPlayerFromCharacter(humanoid.Parent)
+	if driver then return end
+	local sitter, character = sitterOf(hit)
+	if not sitter or sitter.SeatPart then return end
+	if justLeft[sitter] and os.clock() - justLeft[sitter] < 1.5 then return end
+	driver = sitter
+	sitter.SeatPart = seat
+	local player = Players:GetPlayerFromCharacter(character)
 	if player then car:SetNetworkOwner(player) end
 
 	local seated
-	seated = humanoid.Seated:Connect(function(active, part)
+	seated = sitter.Seated:Connect(function(active, part)
 		if not active and part == seat then
 			seated:Disconnect()
-			if driver == humanoid then getOut() end
+			if driver == sitter then getOut() end
 		end
 	end)
 end
@@ -176,11 +186,17 @@ local function key(k) return UserInputService:IsKeyDown(k) end
 local wasDriving = false
 
 RunService.Heartbeat:Connect(function()
+	-- whoever sits in the seat: a Humanoid, or the character itself if it's a CharacterBody3D
 	local character = Players.LocalPlayer and Players.LocalPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local driving = humanoid ~= nil and humanoid.SeatPart == seat
+	local sitter = character and (if character:IsA("CharacterBody3D") then character else character:FindFirstChildOfClass("Humanoid"))
+	local driving = sitter ~= nil and sitter.SeatPart == seat
 	if not driving and not wasDriving then return end -- someone else's car, or parked
 	wasDriving = driving
+	-- a Humanoid gets up by itself on Space; a CharacterBody3D is up to us
+	if driving and sitter:IsA("CharacterBody3D") and key(Enum.KeyCode.Space) then
+		sitter.SeatPart = nil
+		driving = false
+	end
 
 	local throttle, steer = 0, 0
 	if driving then

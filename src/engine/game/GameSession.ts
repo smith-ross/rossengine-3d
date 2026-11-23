@@ -419,6 +419,7 @@ export class GameSession implements Runtime, Runtime2D {
     this.scripts.step(this.gameTime)
     this.scripts.fireFrame(rs, 'PostSimulation', [dt])
     this.scripts.fireFrame(rs, 'Heartbeat', [dt])
+    if (!this.mode2d) this.physics.rideSeats() // seated bodies stay put on their seats, whatever scripts did
     // multiplayer: send this frame's changes (every TICK), glide what others move
     this.netHost?.update(dt)
     this.netClient?.update(dt)
