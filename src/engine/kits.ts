@@ -114,7 +114,8 @@ local car = script.Parent
 local seat = car:WaitForChild("DriverSeat")
 
 local driver = nil -- the Humanoid or CharacterBody3D in the seat
-local justLeft = {} -- [driver] = time, so getting out doesn't sit you straight back down
+local justLeft = {} -- [driver] = time(), so getting out doesn't sit you straight back down
+local WAIT = 1 -- seconds after getting out before touching the car gets you back in
 
 -- what sits down when this part touches the car: a Humanoid, or a CharacterBody3D (or nothing)
 local function sitterOf(hit)
@@ -127,16 +128,24 @@ end
 
 local function getOut()
 	if not driver then return end
-	justLeft[driver] = os.clock()
+	justLeft[driver] = time()
 	driver = nil
 	car:SetNetworkOwner(nil)
 end
 
-local function touched(hit)
+local touched
+function touched(hit)
 	if driver then return end
 	local sitter, character = sitterOf(hit)
 	if not sitter or sitter.SeatPart then return end
-	if justLeft[sitter] and os.clock() - justLeft[sitter] < 1.5 then return end
+	local since = justLeft[sitter] and time() - justLeft[sitter]
+	if since and since < WAIT then
+		-- just got out: if they're still right by the car when the wait is over, in they go
+		task.delay(WAIT - since + 0.05, function()
+			if hit.Parent and (hit.Position - seat.Position).Magnitude < 8 then touched(hit) end
+		end)
+		return
+	end
 	driver = sitter
 	sitter.SeatPart = seat
 	local player = Players:GetPlayerFromCharacter(character)

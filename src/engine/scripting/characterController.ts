@@ -24,6 +24,10 @@ local TURN_SPEED = 12    -- how quickly it turns to face where it's going
 Players.CharacterAutoLoads = false
 local player = Players.LocalPlayer
 if player and player.Character then player.Character:Destroy() end
+-- the body is the player's Character (so scripts know it's yours: Players:GetPlayerFromCharacter, seats...);
+-- scripts start before the player joins, so it may have to wait for them
+local function claim(p) if p == Players.LocalPlayer then p.Character = body end end
+if player then claim(player) else Players.PlayerAdded:Connect(claim) end
 camera.CameraType = Enum.CameraType.Custom
 camera.CameraSubject = body
 
@@ -49,6 +53,12 @@ local function down(...)
 end
 
 RunService.Heartbeat:Connect(function(dt)
+	-- sitting in a seat (body.SeatPart, e.g. a car's): the seat carries the body
+	if body.SeatPart then
+		play("Sit")
+		return
+	end
+
 	-- which way the keys point, flattened onto the ground and relative to the camera
 	local look = camera.CFrame.LookVector
 	local forward = Vector3.new(look.X, 0, look.Z)
@@ -107,6 +117,11 @@ const TURN_SPEED = 12    // how quickly it turns to face where it's going
 Players.CharacterAutoLoads = false
 const player = Players.LocalPlayer
 if (player && player.Character) player.Character.Destroy()
+// the body is the player's Character (so scripts know it's yours: Players.GetPlayerFromCharacter, seats...);
+// scripts start before the player joins, so it may have to wait for them
+const claim = (p: Player) => { if (p === Players.LocalPlayer) p.Character = body }
+if (player) claim(player)
+else Players.PlayerAdded.Connect(claim)
 camera.CameraType = Enum.CameraType.Custom
 camera.CameraSubject = body
 
@@ -127,6 +142,12 @@ function play(name: string, speed = 1) {
 const down = (...keys: any[]) => keys.some((key) => UserInputService.IsKeyDown(key))
 
 RunService.Heartbeat.Connect((dt: number) => {
+	// sitting in a seat (body.SeatPart, e.g. a car's): the seat carries the body
+	if (body.SeatPart) {
+		play('Sit')
+		return
+	}
+
 	// which way the keys point, flattened onto the ground and relative to the camera
 	const look = camera.CFrame.LookVector
 	let forward = Vector3.new(look.X, 0, look.Z)
@@ -182,6 +203,15 @@ Players.CharacterAutoLoads = False
 player = Players.LocalPlayer
 if player and player.Character:
     player.Character.Destroy()
+# the body is the player's Character (so scripts know it's yours: Players.GetPlayerFromCharacter, seats...);
+# scripts start before the player joins, so it may have to wait for them
+def claim(p):
+    if p == Players.LocalPlayer:
+        p.Character = body
+if player:
+    claim(player)
+else:
+    Players.PlayerAdded.Connect(claim)
 camera.CameraType = Enum.CameraType.Custom
 camera.CameraSubject = body
 
@@ -204,6 +234,11 @@ def down(*keys):
     return any(UserInputService.IsKeyDown(key) for key in keys)
 
 def update(dt):
+    # sitting in a seat (body.SeatPart, e.g. a car's): the seat carries the body
+    if body.SeatPart:
+        play("Sit")
+        return
+
     # which way the keys point, flattened onto the ground and relative to the camera
     look = camera.CFrame.LookVector
     forward = Vector3.new(look.X, 0, look.Z)

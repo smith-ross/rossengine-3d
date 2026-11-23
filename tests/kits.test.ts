@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import '../src/engine/classes'
 import { BasePart, DataModel } from '../src/engine/classes'
 import { CFrame, Vector3 } from '../src/engine/datatypes'
-import { Instance, createInstance } from '../src/engine/instance'
+import { Instance, addEventSink, createInstance } from '../src/engine/instance'
 import { Physics, initPhysics } from '../src/engine/physics/Physics'
 import { buildCar } from '../src/engine/kits'
 import { CharacterController, buildDefaultCharacter } from '../src/engine/game/Character'
@@ -132,5 +132,48 @@ describe('car kit', () => {
     run(0.1)
     const out = chassis.cframe.PointToObjectSpace(body.cframe.position)
     expect(out.x).toBeLessThan(-3.5) // on the car's left (the seat's ExitOffset)
+  })
+
+  it('a CharacterBody3D walking into the car with MoveAndSlide touches it (Touched fires)', () => {
+    const { game, car, physics } = scene()
+    const body = createInstance('CharacterBody3D') as BasePart
+    body.set('Size', new Vector3(2.5, 8, 2.5))
+    body.set('CFrame', new CFrame(-12, 4.2, 0))
+    body.setParent(game.workspace)
+    const touched: string[] = [], ended: string[] = []
+    const stop = addEventSink((inst, event, args) => {
+      if (inst !== body) return
+      if (event === 'Touched') touched.push((args[0] as Instance).name)
+      if (event === 'TouchEnded') ended.push((args[0] as Instance).name)
+    })
+    try {
+      // walk right, into the car's left side, the way a controller script does each frame
+      for (let i = 0; i < 90; i++) {
+        body.set('Velocity', new Vector3(16, body.get<Vector3>('Velocity').y, 0))
+        physics.moveAndSlide(body, 1 / 60)
+        physics.step(1 / 60)
+      }
+      expect(touched).toContain('Chassis')
+      expect(touched.filter((n) => n === 'Chassis').length).toBe(1) // once, not every frame
+      // walk away: the touch ends
+      for (let i = 0; i < 30; i++) {
+        body.set('Velocity', new Vector3(-16, body.get<Vector3>('Velocity').y, 0))
+        physics.moveAndSlide(body, 1 / 60)
+        physics.step(1 / 60)
+      }
+      expect(ended).toContain('Chassis')
+      // sit in the car and get out again (its collider is rebuilt both times), then walk back in: touches again
+      body.set('SeatPart', car.findFirstChild('DriverSeat'))
+      physics.step(1 / 60)
+      body.set('SeatPart', null)
+      physics.step(1 / 60)
+      const before = touched.filter((n) => n === 'Chassis').length
+      for (let i = 0; i < 90; i++) {
+        body.set('Velocity', new Vector3(16, body.get<Vector3>('Velocity').y, 0))
+        physics.moveAndSlide(body, 1 / 60)
+        physics.step(1 / 60)
+      }
+      expect(touched.filter((n) => n === 'Chassis').length).toBeGreaterThan(before) // (pushing the car can break and remake contact)
+    } finally { stop() }
   })
 })

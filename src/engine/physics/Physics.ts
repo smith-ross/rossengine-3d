@@ -51,9 +51,13 @@ export class Physics {
   private dirtyWelds = new Set<Instance>()
   /** pairs currently touching, to avoid duplicate Touched events */
   private touching = new Map<string, number>()
+  /** what each character controller (CharacterBody3D, Humanoid root) bumped into on its last move */
+  private bumped = new Map<BasePart, Set<BasePart>>()
   private chars = new Map<BasePart, CharBody>()
   /** CharacterBody3Ds sitting on something (their SeatPart) */
   private seated = new Map<BasePart, BasePart>()
+  /** CharacterBody3Ds whose SeatPart changed: applied at the next flush (it can change inside a Touched handler, mid-step) */
+  private seatsDirty = new Set<BasePart>()
   /** the set of parts riding on character bodies may have changed */
   private followersDirty = false
   /**
@@ -148,7 +152,7 @@ export class Physics {
           this.dirty.add(inst)
           break
         case 'SeatPart':
-          if (isCharacterBody(inst)) this.seatChanged(inst)
+          if (isCharacterBody(inst)) this.seatsDirty.add(inst)
           break
       }
     } else if (isConstraint(inst)) {
@@ -185,6 +189,10 @@ export class Physics {
       if (weld.get('Part0') === part || weld.get('Part1') === part) { this.joints.delete(weld); this.dirtyWelds.add(weld); void j }
     }
     this.byCollider.delete(b.collider.handle)
+    if (!rebuilding) this.endBumps(part, true)
+    // its collider goes (and Rapier reports no end to its contacts): forget what it was touching, so
+    // touches after it's rebuilt fire Touched again
+    this.forgetTouches(part)
     this.world.removeRigidBody(b.rb)
     this.bodies.delete(part)
     this.remote.delete(part)
@@ -316,10 +324,8 @@ export class Physics {
       this.writing = true
       try { body.set('CFrame', cf); body.set('Velocity', Vector3.zero) } finally { this.writing = false }
     }
-    this.dirty.add(body) // its collider: a sensor while seated
-    this.flushDirty()
-    if (seat) this.rideSeats()
-    else this.moveFollowers(body)
+    this.dirty.add(body) // its collider: a sensor while seated (rebuilt by the flush this runs in)
+    if (!seat) this.moveFollowers(body)
   }
 
   /**
@@ -327,6 +333,7 @@ export class Physics {
    * physics step, and again after scripts' Heartbeat so a script turning or moving the body can't knock it off.
    */
   rideSeats() {
+    if (this.seatsDirty.size) this.flushDirty()
     if (!this.seated.size) return
     for (const [body, seat] of this.seated) {
       if (body.destroyed || seat.destroyed || !this.inWorkspace(seat) || body.get('SeatPart') !== seat) {
@@ -349,6 +356,7 @@ export class Physics {
     if (this.seated.has(part)) {
       // sitting: the seat carries it
       const c = this.chars.get(part)
+      this.endBumps(part) // (it bumps nothing while seated)
       if (c) c.state = { floor: true, wall: false, ceiling: false, floorNormal: new Vector3(0, 1, 0) }
       return Vector3.zero
     }
@@ -367,6 +375,7 @@ export class Physics {
       return !o || (o.part !== part && !c.followers.has(o.part))
     })
     const m = c.controller.computedMovement()
+    this.characterBumped(part, c.controller)
     const st: CharacterContact = { floor: c.controller.computedGrounded(), wall: false, ceiling: false, floorNormal: new Vector3(0, 1, 0) }
     for (let i = 0; i < c.controller.numComputedCollisions(); i++) {
       const hit = c.controller.computedCollision(i)
@@ -429,6 +438,11 @@ export class Physics {
   }
 
   flushDirty() {
+    if (this.seatsDirty.size) {
+      const list = [...this.seatsDirty]
+      this.seatsDirty.clear()
+      for (const b of list) if (!b.destroyed) this.seatChanged(b)
+    }
     if (this.dirty.size) {
       const list = [...this.dirty]
       this.dirty.clear()
@@ -502,28 +516,86 @@ export class Physics {
     this.events.drainCollisionEvents((h1, h2, started) => {
       const a = this.byCollider.get(h1), b = this.byCollider.get(h2)
       if (!a || !b) return
-      const pa = a.part, pb = b.part
-      if (a.role && b.role && pa.parent === pb.parent) return // same character
-      const key = pa.id < pb.id ? `${pa.id}:${pb.id}` : `${pb.id}:${pa.id}`
-      const count = this.touching.get(key) ?? 0
-      if (started) {
-        this.touching.set(key, count + 1)
-        if (count > 0) return
-        if (pa.get('CanTouch') && pb.get('CanTouch')) {
-          pa.fire('Touched', pb)
-          pb.fire('Touched', pa)
-          const ha = pa.parent?.findFirstChildOfClass('Humanoid'), hb = pb.parent?.findFirstChildOfClass('Humanoid')
-          if (ha && a.role) ha.fire('Touched', pb, pa)
-          if (hb && b.role) hb.fire('Touched', pa, pb)
-        }
-      } else {
-        if (count <= 1) {
-          this.touching.delete(key)
-          pa.fire('TouchEnded', pb)
-          pb.fire('TouchEnded', pa)
-        } else this.touching.set(key, count - 1)
-      }
+      if (a.role && b.role && a.part.parent === b.part.parent) return // same character
+      if (started) this.touchStart(a, b)
+      else this.touchEnd(a.part, b.part)
     })
+  }
+
+  private forgetTouches(part: BasePart) {
+    if (!this.touching.size) return
+    const id = String(part.id)
+    for (const key of [...this.touching.keys()]) {
+      const i = key.indexOf(':')
+      if (key.slice(0, i) === id || key.slice(i + 1) === id) this.touching.delete(key)
+    }
+    for (const [ch, set] of this.bumped) if (ch !== part) set.delete(part)
+  }
+
+  private touchKey(pa: BasePart, pb: BasePart) { return pa.id < pb.id ? `${pa.id}:${pb.id}` : `${pb.id}:${pa.id}` }
+
+  /** Two parts started touching (counted, so several contacts between them fire Touched once). */
+  private touchStart(a: Body, b: Body) {
+    const pa = a.part, pb = b.part
+    const key = this.touchKey(pa, pb)
+    const count = this.touching.get(key) ?? 0
+    this.touching.set(key, count + 1)
+    if (count > 0) return
+    if (pa.get('CanTouch') && pb.get('CanTouch')) {
+      pa.fire('Touched', pb)
+      pb.fire('Touched', pa)
+      const ha = pa.parent?.findFirstChildOfClass('Humanoid'), hb = pb.parent?.findFirstChildOfClass('Humanoid')
+      if (ha && a.role) ha.fire('Touched', pb, pa)
+      if (hb && b.role) hb.fire('Touched', pa, pb)
+    }
+  }
+
+  private touchEnd(pa: BasePart, pb: BasePart) {
+    const key = this.touchKey(pa, pb)
+    const count = this.touching.get(key) ?? 0
+    if (count <= 0) return
+    if (count <= 1) {
+      this.touching.delete(key)
+      pa.fire('TouchEnded', pb)
+      pb.fire('TouchEnded', pa)
+    } else this.touching.set(key, count - 1)
+  }
+
+  /** A character stopped moving by itself (seated, removed): what it was bumping into stops touching it. */
+  endBumps(part: BasePart, quiet = false) {
+    const was = this.bumped.get(part)
+    if (!was) return
+    this.bumped.delete(part)
+    for (const p of was) {
+      if (!quiet) { this.touchEnd(part, p); continue }
+      // (gone: forget the touch without TouchEnded events)
+      const key = this.touchKey(part, p), n = this.touching.get(key) ?? 0
+      if (n <= 1) this.touching.delete(key)
+      else this.touching.set(key, n - 1)
+    }
+  }
+
+  /**
+   * A character controller moved and bumped into these colliders. It stops just short of what it
+   * walks into, so the physics never reports a contact: these count as touches instead (Touched when
+   * it first bumps something, TouchEnded once it no longer does).
+   */
+  characterBumped(part: BasePart, controller: RAPIER.KinematicCharacterController) {
+    const me = this.bodies.get(part)
+    const was = this.bumped.get(part)
+    const now = new Set<BasePart>()
+    if (me) {
+      for (let i = 0; i < controller.numComputedCollisions(); i++) {
+        const hit = controller.computedCollision(i)
+        const other = hit?.collider ? this.byCollider.get(hit.collider.handle) : undefined
+        if (!other || other.part === part || now.has(other.part)) continue
+        now.add(other.part)
+        if (!was?.has(other.part)) this.touchStart(me, other)
+      }
+    }
+    if (was) for (const p of was) if (!now.has(p)) this.touchEnd(part, p)
+    if (now.size) this.bumped.set(part, now)
+    else this.bumped.delete(part)
   }
 
   applyImpulse(part: BasePart, v: Vector3) {

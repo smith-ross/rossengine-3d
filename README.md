@@ -89,6 +89,8 @@ Scripts in any language that loop without yielding are stopped after 8 seconds (
 `CharacterBody3D` is a character you move from a script, for any custom character in place of the default Humanoid one.
 - **Shape:** a capsule sized by `Size`, kinematic, so physics never pushes it around. It slides along walls, steps up ledges up to `MaxStepHeight`, walks up slopes up to `MaxSlopeAngle`, and sticks to the ground going down.
 - **Riders:** parts inside it, or welded to it, ride along rigidly. Put your character's MeshPart inside it, make the body transparent, and you're done.
+- **Touching:** what it walks into fires `Touched` (on it and on the other part), and `TouchEnded` once it stops pushing against it. It stops just short of things, so without this it would never really touch them.
+- **Sitting:** set its `SeatPart` (see Sitting under Joints).
 
 ```lua
 body.Velocity = Vector3.new(x, body.Velocity.Y, z)  -- gravity (Workspace.Gravity) is added for you
@@ -100,7 +102,9 @@ if body:IsOnFloor() then ... end                    -- also IsOnWall(), IsOnCeil
 - WASD/arrow keys move relative to the camera, Shift sprints, and Space jumps;
 - speeding up and slowing down are smoothed, and the body turns to face where it's going;
 - the default camera follows it (hold the right mouse button to orbit, scroll to zoom);
-- if the body has an AnimationPlayer with animations named `Walk`, `Idle` or `Jump`, it plays them.
+- if the body has an AnimationPlayer with animations named `Walk`, `Idle`, `Jump` or `Sit`, it plays them;
+- it makes the body the player's `Character`, so `Players.LocalPlayer.Character` and `Players:GetPlayerFromCharacter` find it (the car needs this to know who's driving);
+- while the body is in a seat (`SeatPart`), it doesn't walk.
 
 Inserting the controller also turns off `Players.CharacterAutoLoads`, since this body replaces the default character.
 

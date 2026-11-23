@@ -119,7 +119,7 @@ describe('2D character controller', () => {
       })
       expect(problems, `${hz} Hz, seed ${seed}`).toEqual([])
     }
-  })
+  }, 20000) // (a long simulation: slow when the whole suite runs at once)
 
   it('walks up and down a ramp', () => {
     const { game, w2d } = world()

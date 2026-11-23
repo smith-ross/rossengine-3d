@@ -139,6 +139,7 @@ export class CharacterController {
       return !p || p.parent !== this.model
     })
     const m = this.controller.computedMovement()
+    this.physics.characterBumped(this.root, this.controller)
     const wasGrounded = this.grounded
     this.grounded = this.controller.computedGrounded()
     if (this.grounded && this.vy < 0) this.vy = 0
@@ -183,6 +184,7 @@ export class CharacterController {
       this.seat = seat
       if (seat) {
         this.physics.setRole(this.root, 'rider') // pushes nothing, so it doesn't shove what it sits on
+        this.physics.endBumps(this.root)
         this.vy = 0
         this.jumpRequested = false
       } else {
