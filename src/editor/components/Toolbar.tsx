@@ -2,10 +2,10 @@ import { ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
   MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload, Layers,
-  Trash2, Users,
+  Trash2, Users, Cog,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { characterControllerTarget, insertCharacterController, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { characterControllerTarget, insertCharacterController, insertConstraint, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
 import { LANGUAGES, ScriptLanguage } from '../../engine/scripting/languages'
 import { ClassIcon } from './icons'
 import { openPlace, savePlace } from '../fileio'
@@ -147,6 +147,29 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         <Btn icon={<Anchor size={18} />} label="Anchor" active={allAnchored} disabled={playing || !selParts.length}
           onClick={() => editor.mutate(() => { for (const p of selParts) p.set('Anchored', !allAnchored) })} title="Toggle Anchored on the selected parts" />
         <Btn icon={<Link size={18} />} label="Weld" disabled={playing || ed.selection.length < 2} onClick={weldSelection} title="Weld the selected parts together" />
+        <Drop icon={<Cog size={18} />} label="Joint" disabled={playing} wide>
+          {(close) => {
+            const in2d = !!ed.game.getService('World2D').get('Enabled')
+            const list: Array<[string, string, string]> = [
+              ['HingeConstraint', 'Hinge', 'doors, wheels, levers: turns around the pivot\'s up axis'],
+              ['BallSocketConstraint', 'Ball socket', 'pendulums, ragdolls: turns any way'],
+              ['SliderConstraint', 'Slider', 'lifts, pistons, drawers: slides along the pivot\'s up axis'],
+              ['SpringConstraint', 'Spring', 'suspension, bouncy things'],
+              ['RopeConstraint', 'Rope', 'swings, chains, tow ropes'],
+            ]
+            const items = in2d ? list.filter(([c]) => c !== 'BallSocketConstraint').map(([c, l, d]): [string, string, string] => [c + '2D', l, d]) : list
+            return (
+              <div onClick={close}>
+                <div className="menu-cat">{in2d ? 'Select the moving body, then (optionally) the one it hangs on' : 'Select the moving part, then (optionally) what it hangs on'}</div>
+                {items.map(([cls, label, hint]) => (
+                  <div key={cls} className="menu-item" title={hint} onClick={() => insertConstraint(cls)}>
+                    <span><ClassIcon cls={cls} /> {label}</span><span className="menu-shortcut">{hint.split(':')[0]}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          }}
+        </Drop>
       </Group_>
       <Group_ label="Assets">
         <Btn icon={<Upload size={18} />} label="Import" disabled={playing} onClick={async () => { await importFiles(await pickFiles()); editor.bottomTab = 'assets'; editor.emit() }} title="Import sounds, images and 3D models" />

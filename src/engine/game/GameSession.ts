@@ -746,6 +746,11 @@ export class GameSession implements Runtime, Runtime2D {
   }
 
   networkOwner(inst: Instance): Instance | null { return ownerOf(inst, this.game) }
+
+  /** CurrentAngle / CurrentPosition / CurrentLength of a constraint */
+  constraintValue(c: Instance): number {
+    return c.isA('Constraint2D') ? (this.phys2d?.constraintValue(c) ?? 0) : this.physics.constraints.value(c)
+  }
   hostAddress() { return this.netHost?.address ?? '' }
 
   /** Something another machine moves: another player's character, or (on a player's machine) the host's world. */

@@ -7,6 +7,8 @@ import { view2d } from './components/Viewport2D'
 import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
 import { CHARACTER_CONTROLLER } from '../engine/scripting/characterController'
 import { compileRecipe, defaultRecipe } from '../engine/shaderRecipe'
+import { setEnd1, setPivot } from '../engine/constraintClasses'
+import { apply, invert, worldPosition, worldXform } from '../engine/classes2d'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
 export function insertScript(cls: 'Script' | 'LocalScript' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
@@ -302,6 +304,73 @@ export function reparent(insts: Instance[], parent: Instance) {
   const valid = insts.filter((i) => !isService(i) && !i.parentLocked && i !== parent && !parent.isDescendantOf(i))
   if (!valid.length) return
   editor.mutate(() => { for (const i of valid) i.setParent(parent) })
+}
+
+/**
+ * Joints, set up from the selection: the first selected part is the one that moves (Part0), the second
+ * (if any) is what it's attached to (Part1); with one part, it's attached to the world. The pivot goes
+ * where the two parts meet (hinges, sliders, ball sockets), or the ends go at the parts' centres
+ * (springs, ropes). A part that would be held still by Anchored is unanchored so it can move.
+ * In 2D the same with 2D bodies: the joint is put inside the moving body.
+ */
+export function insertConstraint(cls: string): Instance | null {
+  const in2d = cls.endsWith('2D')
+  const sel = topLevelSelection()
+  if (in2d) {
+    const bodies = sel.filter((s) => s.isA('PhysicsBody2D'))
+    if (!bodies.length) { editor.log('warn', 'Select the 2D body that should move first (and then the body it hangs on, if any).'); return null }
+    const [b0, b1] = bodies
+    return editor.mutate(() => {
+      const c = createInstance(cls)
+      c.set('Body0', b0)
+      if (b1) c.set('Body1', b1)
+      const w0 = worldPosition(b0), w1 = b1 ? worldPosition(b1) : null
+      const toLocal = (w: Vector2) => { const l = apply(invert(worldXform(b0)), w.x, w.y); return new Vector2(Math.round(l.x), Math.round(l.y)) }
+      if (cls === 'SpringConstraint2D' || cls === 'RopeConstraint2D') {
+        // from the body's centre to the other body's centre (or a point above it)
+        const end = w1 ? new Vector2(0, 0) : new Vector2(Math.round(w0.x), Math.round(w0.y - 64))
+        c.set('End1', end)
+        const len = w1 ? w1.sub(w0).magnitude : 64
+        c.set(cls === 'SpringConstraint2D' ? 'FreeLength' : 'Length', Math.max(8, Math.round(len)))
+      } else if (w1) c.set('Position', toLocal(w0.Lerp(w1, 0.5))) // halfway between the two
+      c.setParent(b0)
+      if (b0.className === 'StaticBody2D') editor.log('warn', `${b0.name} is a StaticBody2D, which never moves: use a RigidBody2D for the moving side.`)
+      editor.selection = [c]
+      return c
+    })
+  }
+  const parts = sel.flatMap((s) => (s instanceof BasePart ? [s] : s instanceof Model ? partsOf(s).slice(0, 1) : []))
+  if (!parts.length) { editor.log('warn', 'Select the part that should move first (and then the part it is attached to, if any).'); return null }
+  const [p0, p1] = parts
+  return editor.mutate(() => {
+    const c = createInstance(cls)
+    c.set('Part0', p0)
+    if (p1) c.set('Part1', p1)
+    c.setParent(p0)
+    const centre0 = p0.cframe.position
+    if (cls === 'SpringConstraint' || cls === 'RopeConstraint') {
+      setPivot(c, CFrame.fromPosition(centre0))
+      const end = p1 ? p1.cframe.position : centre0.add(new Vector3(0, Math.max(6, p0.size.y + 4), 0))
+      setEnd1(c, end)
+      const len = Math.max(0.5, Math.round(end.sub(centre0).magnitude * 10) / 10)
+      c.set(cls === 'SpringConstraint' ? 'FreeLength' : 'Length', len)
+    } else {
+      // where the two parts meet: the point of each box nearest the other, halfway between
+      const nearest = (p: BasePart, to: Vector3) => {
+        const l = p.cframe.PointToObjectSpace(to), h = p.size.mul(0.5)
+        return p.cframe.PointToWorldSpace(new Vector3(Math.max(-h.x, Math.min(h.x, l.x)), Math.max(-h.y, Math.min(h.y, l.y)), Math.max(-h.z, Math.min(h.z, l.z))))
+      }
+      let at = centre0
+      if (p1) { const a = nearest(p0, p1.cframe.position), b = nearest(p1, a); at = a.Lerp(b, 0.5) }
+      setPivot(c, CFrame.fromPosition(at))
+    }
+    for (const p of [p0]) if (p.get('Anchored')) {
+      p.set('Anchored', false)
+      editor.log('info', `${p.name} is no longer Anchored, so the ${cls.replace('Constraint', '').toLowerCase()} can move it.`)
+    }
+    editor.selection = [c]
+    return c
+  })
 }
 
 export function weldSelection() {

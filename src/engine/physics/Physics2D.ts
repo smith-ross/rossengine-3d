@@ -1,6 +1,7 @@
 // 2D physics (Rapier 2D) for World2D: static/rigid/character/area bodies and tilemap collision.
 // The physics world works in meters (pixels / PixelsPerMeter); y points down like the 2D world.
 import RAPIER from '@dimforge/rapier2d-compat'
+import { Joints2D, isConstraint2D } from './Joints2D'
 import { EnumItem, Vector2 } from '../datatypes'
 import { Instance } from '../instance'
 import { DataModel } from '../classes'
@@ -40,9 +41,12 @@ export class Physics2D {
   frameDt = 1 / 60
   /** multiplayer: bodies another machine controls follow the network (see Physics.isRemote) */
   isRemote: ((body: Instance) => boolean) | null = null
+  /** hinges, sliders, springs, ropes */
+  readonly constraints: Joints2D
 
   constructor(readonly game: DataModel) {
     this.world = new RAPIER.World(this.gravity())
+    this.constraints = new Joints2D(this.world, () => this.ppm)
     this.disposeObserver = game.observe({
       changed: (inst, prop) => {
         if (this.writing) return
@@ -90,9 +94,11 @@ export class Physics2D {
 
   private sync() {
     const seen = new Set<Instance>()
+    const joints: Instance[] = []
     const visit = (inst: Instance) => {
       for (const c of inst.children) {
         if (isNode2D(c)) {
+          if (isConstraint2D(c)) joints.push(c)
           const kind = this.kindOf(c)
           if (kind) {
             seen.add(c)
@@ -113,7 +119,10 @@ export class Physics2D {
     visit(this.w2d)
     this.teleport.clear()
     for (const inst of [...this.bodies.keys()]) if (!seen.has(inst)) this.removeBody(inst)
+    this.constraints.sync(joints, (i) => this.bodies.get(i)?.rb)
   }
+
+  constraintValue(c: Instance) { return this.constraints.value(c) }
 
   private placeKinematic(b: Body) {
     const m = worldXform(b.inst)
@@ -218,6 +227,7 @@ export class Physics2D {
     this.accumulator = Math.min(this.accumulator + dt, STEP * 4)
     let steps = 0
     while (this.accumulator >= STEP) {
+      this.constraints.drive()
       this.world.timestep = STEP
       this.world.step(this.events)
       this.accumulator -= STEP

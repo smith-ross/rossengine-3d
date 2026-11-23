@@ -4,6 +4,7 @@ import { CFrame, EnumItem, Vector3 } from '../datatypes'
 import { Instance } from '../instance'
 import { BasePart, DataModel } from '../classes'
 import { loadMesh, loadedMesh } from '../render/meshes'
+import { Joints3D, isConstraint } from './Joints3D'
 
 let initPromise: Promise<void> | null = null
 export function initPhysics() {
@@ -58,10 +59,13 @@ export class Physics {
    */
   isRemote: ((part: BasePart) => boolean) | null = null
   private remote = new Set<BasePart>()
+  /** hinges, sliders, springs, ropes... */
+  readonly constraints: Joints3D
 
   constructor(readonly game: DataModel) {
     const g = game.workspace.get<number>('Gravity')
     this.world = new RAPIER.World({ x: 0, y: -g, z: 0 })
+    this.constraints = new Joints3D(this.world, (p) => (p instanceof BasePart ? this.bodies.get(p) : undefined))
     for (const d of game.workspace.getDescendants()) this.track(d)
     this.disposeObserver = game.observe({
       added: (inst) => { for (const i of [inst, ...inst.getDescendants()]) this.track(i) },
@@ -84,11 +88,13 @@ export class Physics {
   private track(inst: Instance) {
     if (inst instanceof BasePart && this.inWorkspace(inst)) { this.dirty.add(inst); this.followersDirty = true }
     else if (inst.className === 'WeldConstraint' && this.inWorkspace(inst)) { this.dirtyWelds.add(inst); this.followersDirty = true }
+    else if (isConstraint(inst) && this.inWorkspace(inst)) this.constraints.track(inst)
   }
 
   private untrack(inst: Instance) {
     if (inst instanceof BasePart) { this.dirty.delete(inst); this.removeBody(inst); this.followersDirty = true }
     if (inst.className === 'WeldConstraint') { this.dirtyWelds.delete(inst); this.removeJoint(inst); this.followersDirty = true }
+    if (isConstraint(inst)) this.constraints.untrack(inst)
   }
 
   private changed(inst: Instance, prop: string) {
@@ -139,6 +145,8 @@ export class Physics {
           this.dirty.add(inst)
           break
       }
+    } else if (isConstraint(inst)) {
+      if (this.inWorkspace(inst)) this.constraints.changed(inst, prop)
     } else if (inst.className === 'WeldConstraint' && (prop === 'Part0' || prop === 'Part1' || prop === 'Enabled')) {
       this.dirtyWelds.add(inst)
       this.followersDirty = true
@@ -174,6 +182,7 @@ export class Physics {
     this.world.removeRigidBody(b.rb)
     this.bodies.delete(part)
     this.remote.delete(part)
+    this.constraints.partChanged(part) // (Rapier removed its joints with it)
     const c = this.chars.get(part)
     if (c && !rebuilding) {
       // the body itself is gone (not just being rebuilt): its riders go back to normal physics
@@ -377,6 +386,7 @@ export class Physics {
       this.dirtyWelds.clear()
       for (const w of list) this.createJoint(w)
     }
+    this.constraints.flush()
     // character bodies' riders (may rebuild some bodies as kinematic, so flush once more)
     if (this.followersDirty) {
       this.refreshFollowers()
@@ -395,6 +405,7 @@ export class Physics {
     let steps = 0
     while (this.accumulator >= STEP) {
       onSubstep?.(STEP)
+      this.constraints.drive()
       this.world.timestep = STEP
       this.world.step(this.events)
       this.accumulator -= STEP

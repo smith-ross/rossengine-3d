@@ -4,7 +4,7 @@ import {
   Lightbulb, Link, List, LucideIcon, MapPin, Monitor, Mouse, MousePointerClick, Music, Package, PersonStanding,
   Pointer, Shield, Sparkles, Square, SquareDashed, SquareFunction, Sticker, TextCursorInput, Triangle, Type, User,
   UserRound, Users, Variable, Video, Volume2, Waves, Zap, Shapes, Layers, Move, Image as ImageIcon, Film, Clapperboard, Grid3x3,
-  Square as SquareIcon, Scan, Paintbrush, Aperture, Footprints, Tag, Radio, Network,
+  Square as SquareIcon, Scan, Paintbrush, Aperture, Footprints, Tag, Radio, Network, RotateCcw, CircleDot, MoveVertical, Activity, Cable,
 } from 'lucide-react'
 
 const ICONS: Record<string, [LucideIcon, string]> = {
@@ -25,7 +25,10 @@ const ICONS: Record<string, [LucideIcon, string]> = {
   World2D: [Layers, '#5ad1c9'], Node2D: [Move, '#5ad1c9'], Sprite2D: [ImageIcon, '#5ad1c9'], AnimatedSprite2D: [Film, '#5ad1c9'],
   SpriteAnimation: [Clapperboard, '#5ad1c9'], TileTerrain: [Grid3x3, '#57c26a'], TileMap: [Grid3x3, '#e7b85a'], Camera2D: [Video, '#5ad1c9'], Text2D: [Type, '#5ad1c9'],
   BillboardGui: [Tag, '#b48cff'], LocalScript: [FileCode2, '#5fb4ff'], RemoteEvent: [Radio, '#ffb85a'], RemoteFunction: [Radio, '#ff8f5a'],
-  NetworkService: [Network, '#5fb4ff'], ParticleEmitter: [Sparkles, '#ffb44a'], ParticleEmitter2D: [Sparkles, '#5ad1c9'],
+  NetworkService: [Network, '#5fb4ff'],
+  HingeConstraint: [RotateCcw, '#ffb040'], BallSocketConstraint: [CircleDot, '#ffb040'], SliderConstraint: [MoveVertical, '#ffb040'],
+  SpringConstraint: [Activity, '#ffb040'], RopeConstraint: [Cable, '#c89a5a'],
+  HingeConstraint2D: [RotateCcw, '#ffb040'], SliderConstraint2D: [MoveVertical, '#ffb040'], SpringConstraint2D: [Activity, '#ffb040'], RopeConstraint2D: [Cable, '#c89a5a'], ParticleEmitter: [Sparkles, '#ffb44a'], ParticleEmitter2D: [Sparkles, '#5ad1c9'],
   StaticBody2D: [SquareIcon, '#4adf7a'], RigidBody2D: [Box, '#4adf7a'], CharacterBody2D: [PersonStanding, '#4adf7a'], Area2D: [Scan, '#ffc04a'],
 }
 

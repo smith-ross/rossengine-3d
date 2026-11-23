@@ -5,6 +5,7 @@ import type { SaveStore } from './save'
 import { listMap } from './tables'
 import { DEFAULT_SCREEN_SHADER_SOURCE, DEFAULT_SHADER_SOURCE } from './shaderDefaults'
 import { emitterMethods, emitterProps } from './particleClasses'
+import { registerConstraintClasses, register2DConstraintClasses } from './constraintClasses'
 import {
   DataModelLike, DataModelObserver, Instance, createInstance, defineClass, getClass, isA, setEnumResolver,
 } from './instance'
@@ -49,6 +50,8 @@ export interface Runtime {
   remoteRespond(id: number, ok: boolean, value: unknown): void
   /** the address other players type to join this host ('' when not hosting) */
   hostAddress(): string
+  /** a constraint's angle (hinges), position (sliders) or length (springs, ropes) right now */
+  constraintValue(c: Instance): number
   /** Instance:SetNetworkOwner / GetNetworkOwner */
   setNetworkOwner(inst: Instance, player: Instance | null): void
   networkOwner(inst: Instance): Instance | null
@@ -1110,3 +1113,6 @@ export { createInstance }
 
 // 2D classes (World2D, sprites, tilemaps, 2D physics bodies)
 register2DClasses()
+// physics constraints (hinges, sliders, springs, ropes) in 3D and 2D
+registerConstraintClasses()
+register2DConstraintClasses()

@@ -48,7 +48,22 @@ function texture(content: string, pixelArt: boolean, onLoad: () => void): THREE.
 }
 const loaded = (t: THREE.Texture | null) => !!t?.image && (t.image as HTMLImageElement).width > 0
 
-const DRAWABLE = new Set(['Sprite2D', 'AnimatedSprite2D', 'TileMap', 'Text2D', 'ParticleEmitter2D'])
+const JOINTS_2D = new Set(['HingeConstraint2D', 'SliderConstraint2D', 'SpringConstraint2D', 'RopeConstraint2D'])
+const DRAWABLE = new Set(['Sprite2D', 'AnimatedSprite2D', 'TileMap', 'Text2D', 'ParticleEmitter2D', ...JOINTS_2D])
+
+/** Thick lines as triangles (2D world points, y down -> three.js y up). */
+function strip(points: Array<{ x: number; y: number }>, width: number): Float32Array {
+  const out: number[] = []
+  const h = width / 2
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i], b = points[i + 1]
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
+    const nx = (-dy / len) * h, ny = (dx / len) * h
+    const q = [[a.x + nx, a.y + ny], [b.x + nx, b.y + ny], [b.x - nx, b.y - ny], [a.x - nx, a.y - ny]]
+    for (const k of [0, 1, 2, 0, 2, 3]) out.push(q[k][0], -q[k][1], 0)
+  }
+  return new Float32Array(out)
+}
 
 interface View {
   inst: Instance
@@ -66,6 +81,8 @@ interface View {
   shader?: ShaderMat | null
   /** ParticleEmitter2D: its particles (drawn in world space, outside the node's group) */
   particles?: ParticleSystem
+  /** 2D joints: their drawing, in world space */
+  joint?: THREE.Mesh
 }
 
 export interface Renderer2DOptions {
@@ -243,6 +260,7 @@ export class Renderer2D implements BillboardHost {
       if (v.mesh && this.frameOverride.has(v.inst)) this.applyFrame(v, this.frameOverride.get(v.inst)!)
     }
     this.updateParticles()
+    this.updateJoints()
     this.updateOverlay()
     this.updateShaders()
     const screen = this.screenPasses()
@@ -349,6 +367,7 @@ export class Renderer2D implements BillboardHost {
     if (v) {
       this.scene.remove(v.group)
       if (v.particles) { this.scene.remove(v.particles.points); v.particles.dispose() }
+      if (v.joint) { this.scene.remove(v.joint); v.joint.geometry.dispose(); (v.joint.material as THREE.Material).dispose() }
       v.mat?.dispose()
       v.shader?.material.dispose()
       if (v.mesh && v.mesh.geometry !== PLANE && v.mesh.geometry !== CIRCLE) v.mesh.geometry.dispose()
@@ -371,6 +390,7 @@ export class Renderer2D implements BillboardHost {
       case 'TileMap': this.buildTileMap(v as View & { inst: TileMap }, mat); break
       case 'Text2D': this.buildText(v, mat); break
       case 'ParticleEmitter2D': this.buildEmitter(v); break
+      default: if (JOINTS_2D.has(i.className)) v.bounds = { x: -8, y: -8, w: 16, h: 16 } // grab it by the pivot
     }
     this.applyShader(v)
   }
@@ -385,6 +405,64 @@ export class Renderer2D implements BillboardHost {
     const es = v.inst.get<Vector2>('EmissionSize') ?? new Vector2(16, 16)
     const w = shape === 'Point' ? 16 : Math.max(4, Math.abs(es.x)), h = shape === 'Point' ? 16 : Math.max(4, Math.abs(es.y))
     v.bounds = { x: -w / 2, y: -h / 2, w, h }
+  }
+
+  /** 2D joints: gizmos while editing (and ShowInGame ones in games): ring, track, cord or zigzag. */
+  private updateJoints() {
+    const editing = !!this.opts.editor
+    for (const v of this.drawList) {
+      const c = v.inst
+      if (!JOINTS_2D.has(c.className)) continue
+      const show = v.group.visible && (editing || !!c.get('ShowInGame'))
+      if (!show) { if (v.joint) v.joint.visible = false; continue }
+      if (!v.joint) {
+        v.joint = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }))
+        this.scene.add(v.joint)
+      }
+      const col = c.get<Color3>('Color')
+      const mat = v.joint.material as THREE.MeshBasicMaterial
+      mat.color.setRGB(col.r, col.g, col.b, THREE.SRGBColorSpace)
+      mat.opacity = editing && !this.selection.includes(c) && !c.get('ShowInGame') ? 0.6 : 1
+      const m = v.world, px = 1 / Math.max(0.01, this.view.zoom)
+      const at = { x: m.tx, y: m.ty }
+      const rot = xformRotation(m), up = { x: Math.sin(rot), y: -Math.cos(rot) }
+      const lines: Array<Array<{ x: number; y: number }>> = []
+      let width = 2 * px
+      if (c.className === 'SpringConstraint2D' || c.className === 'RopeConstraint2D') {
+        const e1 = c.get<Vector2>('End1') ?? new Vector2(0, 0)
+        const b1 = c.get<Instance | null>('Body1')
+        const bm = b1 ? this.nodes.get(b1) : null
+        const end = bm ? apply(bm, e1.x, e1.y) : { x: e1.x, y: e1.y }
+        width = c.get('ShowInGame') ? Math.max(px, c.get<number>('Thickness') ?? 2) : 2 * px
+        if (c.className === 'RopeConstraint2D') lines.push([at, end])
+        else {
+          // zigzag across the line from the pivot to the end
+          const dx = end.x - at.x, dy = end.y - at.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len
+          const pts = [at]
+          const zigs = 10, amp = Math.max(3, width * 2)
+          for (let k = 1; k < zigs * 2; k++) { const t = k / (zigs * 2), s = k % 2 ? amp : -amp; pts.push({ x: at.x + dx * t + nx * s, y: at.y + dy * t + ny * s }) }
+          pts.push(end)
+          lines.push(pts)
+        }
+      } else if (c.className === 'HingeConstraint2D') {
+        const r = 6 * px, ring: Array<{ x: number; y: number }> = []
+        for (let k = 0; k <= 20; k++) { const a = (k / 20) * Math.PI * 2; ring.push({ x: at.x + Math.cos(a) * r, y: at.y + Math.sin(a) * r }) }
+        lines.push(ring, [{ x: at.x - r * 0.5, y: at.y }, { x: at.x + r * 0.5, y: at.y }], [{ x: at.x, y: at.y - r * 0.5 }, { x: at.x, y: at.y + r * 0.5 }])
+      } else {
+        const lo = c.get('LimitsEnabled') ? c.get<number>('LowerLimit') : -40, hi = c.get('LimitsEnabled') ? c.get<number>('UpperLimit') : 40
+        lines.push([{ x: at.x + up.x * lo, y: at.y + up.y * lo }, { x: at.x + up.x * hi, y: at.y + up.y * hi }])
+        const s = 4 * px
+        lines.push([{ x: at.x - s, y: at.y - s }, { x: at.x + s, y: at.y - s }, { x: at.x + s, y: at.y + s }, { x: at.x - s, y: at.y + s }, { x: at.x - s, y: at.y - s }])
+      }
+      const parts = lines.map((l) => strip(l, width))
+      const all = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
+      let o = 0
+      for (const p of parts) { all.set(p, o); o += p.length }
+      v.joint.geometry.setAttribute('position', new THREE.BufferAttribute(all, 3))
+      v.joint.geometry.computeBoundingSphere()
+      v.joint.renderOrder = editing ? 1e9 - 5 : v.order
+      v.joint.visible = true
+    }
   }
 
   private particleClock = performance.now()
@@ -746,7 +824,7 @@ export class Renderer2D implements BillboardHost {
   pick(p: Vector2, ignore?: (i: Instance) => boolean): Instance | null {
     const candidates: Array<{ inst: Instance; order: number }> = []
     // emitters can be picked in the editor (to select and drag them), not by the game's mouse
-    for (const v of this.drawList) if (v.group.visible && (this.opts.editor || !v.particles)) candidates.push({ inst: v.inst, order: v.order })
+    for (const v of this.drawList) if (v.group.visible && (this.opts.editor || (!v.particles && !JOINTS_2D.has(v.inst.className)))) candidates.push({ inst: v.inst, order: v.order })
     for (const [n] of this.nodes) if (n.isA('PhysicsBody2D') && !this.views.has(n)) candidates.push({ inst: n, order: -1 })
     candidates.sort((a, b) => b.order - a.order)
     for (const { inst } of candidates) {

@@ -184,6 +184,35 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 - **auto-tiling:** in the palette, click **+ Terrain** with the top-left tile of a block selected, then pick the terrain as the brush. Painting, erasing and rectangles then choose edge and corner tiles automatically. **Re-tile map** refreshes everything after you change a terrain's `Tiles`;
 - the Properties panel shows a sprite's sheet: click frames to set `Frame`, or to build a `SpriteAnimation`'s frame list, and **Fit size to frame**.
 
+## Joints
+
+Joints connect parts so they move together in a particular way. Each one is a single object: no attachments to line up.
+
+**Making one:** select the part that should move, then (optionally) the part it's attached to, and pick from **Joint** in the toolbar. With one part selected, it's attached to the world.
+- Hinges, sliders and ball sockets go where the two parts meet. Springs and ropes run from the first part's centre to the second's (or to a point above it).
+- If the moving part is Anchored, it's unanchored so it can move.
+- Select a joint and use **Move** / **Rotate** to put its pivot exactly where you want it, or type its `Position` / `Orientation`.
+
+| Joint | Moves like | Settings |
+| --- | --- | --- |
+| `HingeConstraint` | a door, wheel or lever: turns around the pivot's up axis | `Mode`, `Speed` (°/s), `MaxTorque`, `TargetAngle`, `LimitsEnabled`, `LowerAngle` / `UpperAngle`; reads `CurrentAngle` |
+| `BallSocketConstraint` | a pendulum or ragdoll joint: turns any way around the pivot | |
+| `SliderConstraint` | a lift, piston or drawer: slides along the pivot's up axis | `Mode`, `Speed` (studs/s), `MaxForce`, `TargetPosition`, `LimitsEnabled`, `LowerLimit` / `UpperLimit`; reads `CurrentPosition` |
+| `SpringConstraint` | suspension, bouncy things: pulls its ends towards `FreeLength` apart | `Stiffness`, `Damping`, `End1`; reads `CurrentLength` |
+| `RopeConstraint` | a swing, chain or tow rope: keeps its ends at most `Length` apart | `End1`; reads `CurrentLength` |
+
+- **`Mode`** (hinges and sliders): `Free` swings freely; `Motor` keeps turning or sliding at `Speed`; `Servo` goes to `TargetAngle` / `TargetPosition` at up to `Speed` and holds it there. Positive values turn anticlockwise round the axis (seen from its tip) or slide towards it.
+- **Angles and positions are measured from where things are when the game starts**, so 0 is how you built it. Limits use the same numbers.
+- **`Part0`** is the part that moves, and **`Part1`** what it's attached to (empty: the world). The pivot is stored relative to `Part0`, so it moves with it while you build. The two parts don't collide with each other where a hinge, slider or ball socket joins them.
+- **While editing** every joint is drawn. **In the game**, only ones with **`ShowInGame`** are: ropes and springs (as cords and coils, in `Color` and `Thickness`) unless you turn it off.
+- Scripts can change any of it while the game runs, e.g. `door.HingeConstraint.TargetAngle = 90` to open a door, or `Enabled = false` to let go.
+
+**2D:** the same joints for 2D bodies: `HingeConstraint2D`, `SliderConstraint2D`, `SpringConstraint2D` and `RopeConstraint2D`, from **Joint** while the place is 2D.
+- A 2D joint is a 2D object. Put it inside the moving body (`Body0`, the default), and its position is the pivot. `Body1` is what it's attached to (empty: the world).
+- A slider moves along the joint's up direction, which turns with the joint. Lengths are in pixels.
+- Angles go clockwise, like `Rotation`.
+- A spring's or rope's `End1` is a point in `Body1`'s space, or in the world.
+
 ## Shaders
 
 There are two ways to make a shader:

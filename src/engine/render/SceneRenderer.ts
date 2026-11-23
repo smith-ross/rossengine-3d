@@ -11,6 +11,8 @@ import { assets } from '../assets'
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { ParticleSystem, coneDirection, readSettings, requestsOf } from './particles'
+import { ConstraintVisuals } from './constraintVisuals'
+import { CONSTRAINT_CLASSES } from '../constraintClasses'
 import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFailed, setPassMaterial, shaderMaterial, updateShaderUniforms } from './shaders'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
@@ -100,6 +102,11 @@ export class SceneRenderer implements BillboardHost {
   private lights = new Map<Instance, THREE.Light>()
   private decals = new Map<Instance, THREE.Mesh>()
   private particles = new Map<Instance, ParticleSystem>()
+  /** joints (HingeConstraint…) in the workspace, and their drawings */
+  private constraintSet = new Set<Instance>()
+  private constraintVisuals: ConstraintVisuals
+  /** the editor draws every joint; a game only Visible ones */
+  showConstraints = false
   private particleClock = performance.now()
   private selectionBoxes = new Map<Instance, THREE.Box3Helper>()
   private hoverBox: THREE.Box3Helper
@@ -150,6 +157,7 @@ export class SceneRenderer implements BillboardHost {
     this.sun.shadow.normalBias = 0.05
     this.scene.add(this.sun, this.sun.target, this.hemi, this.ambient)
 
+    this.constraintVisuals = new ConstraintVisuals(this.scene)
     this.sky = makeSky()
     this.scene.add(this.sky)
 
@@ -230,6 +238,7 @@ export class SceneRenderer implements BillboardHost {
     this.updateRigs()
     this.updateShaders()
     this.updateParticles()
+    if (this.constraintSet.size) this.constraintVisuals.update(this.constraintSet, this.showConstraints, this.selection)
     const screen = this.screenPasses()
     if (screen) screen.composer.render()
     else this.renderer.render(this.scene, this.camera)
@@ -506,6 +515,7 @@ export class SceneRenderer implements BillboardHost {
     this.resizeObserver.disconnect()
     for (const v of this.views.values()) { v.material.dispose(); v.shader?.material.dispose() }
     for (const ps of this.particles.values()) ps.dispose()
+    this.constraintVisuals.dispose()
     if (this.screen) { for (const p of this.screen.passes) p.pass.dispose(); this.screen.composer.dispose() }
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -559,6 +569,10 @@ export class SceneRenderer implements BillboardHost {
       this.updateDecal(inst)
       return
     }
+    if (CONSTRAINT_CLASSES.includes(inst.className)) {
+      if (this.inWorkspace(inst)) this.constraintSet.add(inst)
+      return
+    }
     if (inst.className === 'ParticleEmitter') {
       // emits from the part it is inside
       if (!(inst.parent instanceof BasePart) || !this.inWorkspace(inst)) return
@@ -610,6 +624,7 @@ export class SceneRenderer implements BillboardHost {
       l.dispose()
       this.lights.delete(inst)
     }
+    if (this.constraintSet.delete(inst)) this.constraintVisuals.remove(inst)
     const ps = this.particles.get(inst)
     if (ps) { this.scene.remove(ps.points); ps.dispose(); this.particles.delete(inst) }
     const b = this.selectionBoxes.get(inst)

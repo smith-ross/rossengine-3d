@@ -63,7 +63,14 @@ export function Viewport() {
       pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3>; side: THREE.Vector3
       /** posing a Bone: its world matrix and its parent's when the drag began */
       bone?: { inst: Instance; startWorld: THREE.Matrix4; parentWorld: THREE.Matrix4; startScale: Vector3 }
+      /** moving / turning a joint's pivot */
+      joint?: Instance
     } | null = null
+    /** a single selected joint (HingeConstraint…): the gizmo moves and turns its pivot */
+    const selectedJoint = () => {
+      const s = editor.selection
+      return s.length === 1 && s[0].isA('Constraint') && !editor.playing ? s[0] : null
+    }
     /** a single selected Bone whose model is loaded: the gizmo poses it */
     const selectedBone = () => {
       const s = editor.selection
@@ -87,9 +94,10 @@ export function Viewport() {
     const syncGizmo = () => {
       const sel = editor.selection.filter((s) => s instanceof BasePart || s instanceof Model)
       const bone = selectedBone()
-      const pivot = editor.playing ? null : bone ? worldCFrame(bone.obj.matrixWorld) : selectionPivot(sel)
+      const joint = selectedJoint()
+      const pivot = editor.playing ? null : bone ? worldCFrame(bone.obj.matrixWorld) : joint ? joint.get<CFrame>('Pivot') : selectionPivot(sel)
       const tool = editor.tool
-      const visible = !!pivot && tool !== 'select' && !(tool === 'scale' && !bone && !(sel.length === 1 && sel[0] instanceof BasePart))
+      const visible = !!pivot && tool !== 'select' && !(tool === 'scale' && (joint || (!bone && !(sel.length === 1 && sel[0] instanceof BasePart))))
       helper.visible = visible
       tc.enabled = visible
       if (!pivot || dragStart) return
@@ -113,6 +121,12 @@ export function Viewport() {
             pivot: worldCFrame(bone.obj.matrixWorld), parts: new Map(), sizes: new Map(), side: new THREE.Vector3(),
             bone: { inst: bone.inst, startWorld: bone.obj.matrixWorld.clone(), parentWorld: bone.obj.parent!.matrixWorld.clone(), startScale: bone.inst.get<Vector3>('PoseScale') },
           }
+          return
+        }
+        const joint = selectedJoint()
+        if (joint) {
+          editor.checkpoint()
+          dragStart = { pivot: joint.get<CFrame>('Pivot'), parts: new Map(), sizes: new Map(), side: new THREE.Vector3(), joint }
           return
         }
         const sel = editor.selection.filter((s) => s instanceof BasePart || s instanceof Model)
@@ -141,6 +155,10 @@ export function Viewport() {
       if (!dragStart) return
       const m = new THREE.Matrix4().compose(pivotObj.position, pivotObj.quaternion, new THREE.Vector3(1, 1, 1))
       const now = CFrame.fromMatrix4(m)
+      if (dragStart.joint) {
+        if (tc.mode !== 'scale') dragStart.joint.set('Pivot', now) // the pivot is where the gizmo is
+        return
+      }
       if (dragStart.bone) {
         // new world pose = gizmo delta * start pose; back into the bone's space as an offset from rest
         const b = dragStart.bone
@@ -177,6 +195,7 @@ export function Viewport() {
       for (const [p, cf] of dragStart.parts) p.set('CFrame', delta.mul(cf))
     })
 
+    r.showConstraints = true // joints are drawn while editing (in a game only Visible ones)
     const unsub = editor.subscribe(() => {
       r.setSelection(editor.playing ? [] : editor.selection)
       syncGizmo()
