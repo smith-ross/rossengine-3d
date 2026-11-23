@@ -19,6 +19,11 @@ const MOTOR_FACTOR = 1000
 /** servos: speed per unit of error (1/s), capped at Speed */
 const SERVO_GAIN = 10
 
+/** props that only change how a joint is drawn */
+const DRAWING = new Set(['Color', 'Thickness', 'ShowInGame', 'Name'])
+/** props applied to a joint in place (no rebuild) */
+const LIVE = new Set(['Speed', 'MaxTorque', 'MaxForce', 'TargetAngle', 'TargetPosition'])
+
 interface BodyRef { rb: RAPIER.RigidBody; role?: string }
 interface Entry { joint: RAPIER.ImpulseJoint; kind: string; p0: Instance; p1: Instance | null; b0: RAPIER.RigidBody; b1: RAPIER.RigidBody; f0: CFrame; f1: CFrame }
 
@@ -35,8 +40,16 @@ export class Joints3D {
 
   track(c: Instance) { this.all.add(c); this.dirty.add(c) }
   untrack(c: Instance) { this.drop(c); this.all.delete(c); this.dirty.delete(c); this.locked.delete(c) }
-  changed(c: Instance, prop: string) { if (!prop.startsWith('Current')) this.dirty.add(c) }
+  changed(c: Instance, prop: string) {
+    if (prop.startsWith('Current') || DRAWING.has(prop)) return
+    // motor settings a driving script changes every frame: applied to the joint as it is
+    const e = this.entries.get(c)
+    if (e && LIVE.has(prop) && !this.dirty.has(c)) { this.applyMotor(c, e); return }
+    this.dirty.add(c)
+  }
   get pending() { return this.dirty.size > 0 }
+  /** how many joints are in the world */
+  get count() { return this.entries.size }
 
   /** A part's body was rebuilt (or is gone): joints on it are remade. */
   partChanged(part: Instance) {
@@ -109,16 +122,26 @@ export class Joints3D {
           const lo = c.get<number>(hinge ? 'LowerAngle' : 'LowerLimit'), hi = c.get<number>(hinge ? 'UpperAngle' : 'UpperLimit')
           unit.setLimits(hinge ? rad(Math.min(lo, hi)) : Math.min(lo, hi), hinge ? rad(Math.max(lo, hi)) : Math.max(lo, hi))
         }
-        const mode = c.get<EnumItem>('Mode')?.name
-        if (mode === 'Motor' || mode === 'Servo') {
-          unit.setMotorMaxForce(Math.max(0, c.get<number>(hinge ? 'MaxTorque' : 'MaxForce')))
-          if (mode === 'Motor') unit.configureMotorVelocity(hinge ? rad(c.get<number>('Speed')) : c.get<number>('Speed'), MOTOR_FACTOR)
-        }
       }
     }
-    this.entries.set(c, { joint, kind, p0, p1, b0: b0.rb, b1: rb1, f0, f1 })
+    const e: Entry = { joint, kind, p0, p1, b0: b0.rb, b1: rb1, f0, f1 }
+    this.entries.set(c, e)
+    this.applyMotor(c, e)
     b0.rb.wakeUp()
     if (rb1.isDynamic()) rb1.wakeUp()
+  }
+
+  /** Motor / Servo: how hard it pushes, and (Motor) how fast it turns. */
+  private applyMotor(c: Instance, e: Entry) {
+    if (e.kind !== 'HingeConstraint' && e.kind !== 'SliderConstraint') return
+    const mode = c.get<EnumItem>('Mode')?.name
+    if (mode !== 'Motor' && mode !== 'Servo') return
+    const hinge = e.kind === 'HingeConstraint'
+    const unit = e.joint as RAPIER.UnitImpulseJoint
+    unit.setMotorMaxForce(Math.max(0, c.get<number>(hinge ? 'MaxTorque' : 'MaxForce')))
+    if (mode === 'Motor') unit.configureMotorVelocity(hinge ? rad(c.get<number>('Speed')) : c.get<number>('Speed'), MOTOR_FACTOR)
+    e.b0.wakeUp()
+    if (e.b1.isDynamic()) e.b1.wakeUp()
   }
 
   /** Every physics step: servos steer towards their target. */

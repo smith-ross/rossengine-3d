@@ -789,6 +789,11 @@ export class Humanoid extends Instance {
         this.fire('Died')
       }
     }
+    if (prop === 'SeatPart') {
+      const seat = this.get<Instance | null>('SeatPart')
+      if (old) this.fire('Seated', false, old)
+      if (seat) this.fire('Seated', true, seat)
+    }
   }
 }
 defineClass(Humanoid, {
@@ -805,6 +810,8 @@ defineClass(Humanoid, {
     Jump: { type: 'bool', noSave: true },
     FloorMaterial: { type: 'Enum.Material', readonly: true, noSave: true },
     RootPart: { type: 'Instance', readonly: true, noSave: true, get: (h: Instance) => h.parent?.findFirstChild('HumanoidRootPart') ?? null },
+    // sitting: the character rides on this part (it moves and turns with it) until Jump, or until it's set to nil
+    SeatPart: { type: 'Instance', noSave: true, category: 'Game' },
   },
   methods: {
     TakeDamage: (self: Humanoid, amount: unknown) => {
@@ -813,9 +820,14 @@ defineClass(Humanoid, {
     },
     Move: (self: Instance, dir: Vector3, rel: unknown) => rt(self).humanoidMove(self, dir, !!rel),
     MoveTo: (self: Instance, pos: Vector3) => rt(self).humanoidMoveTo(self, pos),
-    GetState: (self: Humanoid) => enumItem('HumanoidStateType', self.dead ? 'Dead' : 'Running'),
+    GetState: (self: Humanoid) => enumItem('HumanoidStateType', self.dead ? 'Dead' : self.get('SeatPart') ? 'Seated' : 'Running'),
+    /** sit on a part (nil: stand up) */
+    Sit: (self: Humanoid, seat: unknown) => {
+      if (self.dead) return
+      self.set('SeatPart', seat instanceof BasePart ? seat : null)
+    },
   },
-  events: ['Died', 'HealthChanged', 'Jumping', 'Running', 'FreeFalling', 'StateChanged', 'MoveToFinished', 'Touched'],
+  events: ['Died', 'Seated', 'HealthChanged', 'Jumping', 'Running', 'FreeFalling', 'StateChanged', 'MoveToFinished', 'Touched'],
 })
 class ForceField extends Instance {}
 defineClass(ForceField, { name: 'ForceField', superclass: 'Instance', category: 'Characters', props: { Visible: { type: 'bool', default: () => true } } })

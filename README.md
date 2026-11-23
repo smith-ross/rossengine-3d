@@ -79,7 +79,7 @@ Supported API includes:
 - **Datatypes:** `Vector3`, `Vector2`, `CFrame`, `Color3`, `BrickColor`, `UDim`/`UDim2`, `TweenInfo`, `Ray`, `RaycastParams`, `Random`, `Enum`.
 - **Instance API:** `FindFirstChild`, `WaitForChild`, `GetChildren`, `GetDescendants`, attributes, tags, `Changed`, `GetPropertyChangedSignal`, `ChildAdded`, and more.
 - **Services:** Players, RunService (`Heartbeat`, `RenderStepped`, `BindToRenderStep`), UserInputService, ContextActionService, TweenService, Debris, HttpService (JSON), CollectionService, Lighting.
-- **Parts:** physics and `Touched`, Humanoid characters (walking, jumping, death and respawn, `MoveTo`), ClickDetector, Sound, MeshPart, Decal, PointLight and SpotLight.
+- **Parts:** physics and `Touched`, Humanoid characters (walking, jumping, sitting, death and respawn, `MoveTo`), ClickDetector, Sound, MeshPart, Decal, PointLight and SpotLight.
 - **GUI:** ScreenGui with Frame, TextLabel, TextButton, TextBox, ImageLabel, UICorner, UIStroke and UIListLayout. BillboardGui shows the same elements over things in the world (see [Billboards](#billboards)).
 
 Scripts in any language that loop without yielding are stopped after 8 seconds ("Script timeout").
@@ -212,6 +212,26 @@ Joints connect parts so they move together in a particular way. Each one is a si
 - A slider moves along the joint's up direction, which turns with the joint. Lengths are in pixels.
 - Angles go clockwise, like `Rotation`.
 - A spring's or rope's `End1` is a point in `Body1`'s space, or in the world.
+
+### Cars and ragdolls
+
+These are built from ordinary parts, joints and scripts, not special classes. They're under **Joint → Built from joints** (in 3D). Once added, you can take one apart, restyle it, or copy its scripts into your own things.
+
+**Car:** a model with a chassis, a seat and four wheels.
+- **Wheels:** each wheel turns on a `HingeConstraint` in `Motor` mode. It's attached to an invisible hub.
+- **Suspension:** each hub slides up and down on a `SliderConstraint`, held up by a `SpringConstraint`.
+- **Steering:** the front hubs turn on `Servo` hinges.
+- **Getting in and out:** walk into the car to get in, then drive with **W/S** and steer with **A/D**. **Space** gets you out.
+- **Scripts:** the car's `Seat` Script seats whoever touches it. The `Drive` LocalScript sets the wheels' `Speed` / `MaxTorque` and the steering hinges' `TargetAngle` from the keys.
+- **Tuning:** use the car model's attributes: `MaxSpeed`, `ReverseSpeed`, `Torque`, `BrakeTorque`, `SteerAngle` and `SteerSpeed`.
+- **Multiplayer:** the driver's machine runs the car while they're in it. The `Seat` script uses `SetNetworkOwner` for this.
+
+**Ragdoll script:** adds a `Ragdoll` Script to ScriptService. When any character dies (a player's or an NPC's), it joins the limbs to the torso. Legs and the head get limited hinges and the arms get ball sockets. The body then flops over instead of falling apart.
+
+**Sitting:** any part can be a seat. Set a Humanoid's `SeatPart`, or call `humanoid:Sit(part)`.
+- The character sits on top of the part and rides along with it. It doesn't push the part around.
+- **Space** stands it up beside the seat: on its left, or wherever the seat's `ExitOffset` attribute (a Vector3 in the seat's own space) says.
+- `Seated(active, seat)` fires both ways, and `humanoid:Sit(nil)` stands it up.
 
 ## Shaders
 

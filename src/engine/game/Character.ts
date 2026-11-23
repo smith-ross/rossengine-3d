@@ -54,6 +54,8 @@ export class CharacterController {
   private yaw: number
   private disposed = false
   private lastState = ''
+  /** the part this character is sitting on (Humanoid.SeatPart), while seated */
+  private seat: BasePart | null = null
   dead = false
 
   constructor(readonly model: Model, readonly humanoid: Humanoid, readonly physics: Physics, readonly time: () => number) {
@@ -94,6 +96,7 @@ export class CharacterController {
     if (this.dead || this.disposed || this.root.destroyed) return
     const h = this.humanoid
     if (h.get<number>('Health') <= 0) { this.die(); return }
+    if (this.updateSeat()) return
     const body = this.physics.bodyOf(this.root)
     if (!body) return
     const rootCF = this.root.cframe
@@ -166,7 +169,59 @@ export class CharacterController {
     this.poseLimbs(newCF, dir.magnitude > 0.01)
   }
 
-  private poseLimbs(rootCF: CFrame, walking: boolean) {
+  /**
+   * Humanoid.SeatPart: sit on it (riding along as it moves), stand up on Jump or when it's cleared.
+   * Returns true while seated (no walking this step).
+   */
+  private updateSeat(): boolean {
+    const h = this.humanoid
+    const want = h.get<Instance | null>('SeatPart')
+    const seat = want instanceof BasePart && !want.destroyed && want.isDescendantOf(this.physics.game.workspace) ? want : null
+    if (want && !seat) h.set('SeatPart', null) // the seat is gone
+    if (seat !== this.seat) {
+      const old = this.seat
+      this.seat = seat
+      if (seat) {
+        this.physics.setRole(this.root, 'rider') // pushes nothing, so it doesn't shove what it sits on
+        this.vy = 0
+        this.jumpRequested = false
+      } else {
+        this.physics.setRole(this.root, 'root')
+        if (old && !old.destroyed) {
+          // stand up beside the seat (on its left, or where its ExitOffset attribute says), facing the same way
+          const exit = old.attributes.get('ExitOffset')
+          const out = old.cframe.mul(exit instanceof Vector3 ? CFrame.fromPosition(exit) : new CFrame(-(old.size.x / 2 + 2.5), 2, 0))
+          const look = old.cframe.lookVector
+          this.yaw = Math.atan2(-look.x, -look.z)
+          this.root.set('CFrame', CFrame.fromOrientation(out.position, new Vector3(0, (this.yaw * 180) / Math.PI, 0)))
+        }
+        this.vy = 0
+      }
+    }
+    if (!seat) return false
+    if (h.get<boolean>('Jump')) { this.jumpRequested = true; h.rawSet('Jump', false) }
+    if (this.jumpRequested) {
+      this.jumpRequested = false
+      h.set('SeatPart', null) // stands up next step
+    }
+    if (!h.get<Vector3>('MoveDirection').equals(Vector3.zero)) { h.rawSet('MoveDirection', Vector3.zero); h.changed('MoveDirection') }
+    // sitting on top of the seat: the legs (sticking out in front) resting on its top face
+    const cf = seat.cframe.mul(new CFrame(0, seat.size.y / 2 + 1.5, 0))
+    const look = cf.lookVector
+    this.yaw = Math.atan2(-look.x, -look.z)
+    this.root.set('CFrame', cf)
+    const body = this.physics.bodyOf(this.root)
+    if (body) {
+      body.rb.setNextKinematicTranslation({ x: cf.x, y: cf.y, z: cf.z })
+      body.rb.setNextKinematicRotation(cf.toQuaternion())
+    }
+    this.grounded = true
+    if (this.lastState !== 'Seated') { this.lastState = 'Seated'; h.fire('StateChanged', enumItem('HumanoidStateType', 'Running'), enumItem('HumanoidStateType', 'Seated')) }
+    this.poseLimbs(cf, false, true)
+    return true
+  }
+
+  private poseLimbs(rootCF: CFrame, walking: boolean, sitting = false) {
     const swing = walking && this.grounded ? Math.sin(this.animTime * 9) * 0.9 : 0
     for (const [part, offset] of this.offsets) {
       if (part.destroyed) continue
@@ -175,6 +230,7 @@ export class CharacterController {
       if (limb) {
         let angle = swing * limb.sign
         if (!this.grounded) angle = limb.arm ? Math.PI * 0.9 : 0.15 * limb.sign
+        if (sitting) angle = limb.arm ? 1.2 : Math.PI / 2 // legs out in front, hands forward
         const piv = limb.pivot
         local = offset
           .mul(new CFrame(0, piv, 0))
@@ -196,6 +252,8 @@ export class CharacterController {
     this.dead = true
     this.humanoid.dead = true
     if (this.humanoid.get<number>('Health') > 0) this.humanoid.set('Health', 0)
+    if (this.humanoid.get('SeatPart')) this.humanoid.set('SeatPart', null)
+    this.seat = null
     this.dispose()
     // fall apart
     for (const p of [this.root, ...this.offsets.keys()]) {

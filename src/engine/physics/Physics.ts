@@ -13,7 +13,8 @@ export function initPhysics() {
 }
 export { RAPIER }
 
-export type CharacterRole = 'root' | 'limb'
+/** root: walks (character controller); limb: follows it; rider: a root sitting on something (moves with it, pushes nothing) */
+export type CharacterRole = 'root' | 'limb' | 'rider'
 
 interface Body {
   part: BasePart
@@ -213,10 +214,10 @@ export class Physics {
       desc.setLinvel(v.x, v.y, v.z).setAngvel({ x: w.x, y: w.y, z: w.z })
     }
     const rb = this.world.createRigidBody(desc)
-    const cdesc = role === 'root' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0)
+    const cdesc = role === 'root' || role === 'rider' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0)
       : character ? characterCapsule(part) : this.shapeFor(part)
     const canCollide = part.get<boolean>('CanCollide')
-    if (role === 'limb' || (!canCollide && role !== 'root')) cdesc.setSensor(true)
+    if (role === 'limb' || role === 'rider' || (!canCollide && role !== 'root')) cdesc.setSensor(true)
     cdesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
     cdesc.setActiveCollisionTypes(RAPIER.ActiveCollisionTypes.ALL)
     cdesc.setFriction(0.5).setRestitution(0)
@@ -406,6 +407,8 @@ export class Physics {
     while (this.accumulator >= STEP) {
       onSubstep?.(STEP)
       this.constraints.drive()
+      // chains of joints (a car's wheel, hub and strut) need more solver passes to stay firm
+      this.world.numSolverIterations = this.constraints.count ? 8 : 4
       this.world.timestep = STEP
       this.world.step(this.events)
       this.accumulator -= STEP
@@ -495,7 +498,7 @@ export class Physics {
       const b = this.byCollider.get(c.handle)
       if (!b) return false
       const p = b.part
-      if (b.role === 'root') return include ? matches(p) : !filterList.some((f) => p.isDescendantOf(f) || f === p) && !matchesCharacter(filterList, p)
+      if (b.role === 'root' || b.role === 'rider') return include ? matches(p) : !filterList.some((f) => p.isDescendantOf(f) || f === p) && !matchesCharacter(filterList, p)
       if (!p.get('CanQuery')) return false
       if (respectCanCollide && !p.get('CanCollide')) return false
       return include ? matches(p) : !matches(p)

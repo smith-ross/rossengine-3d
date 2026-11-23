@@ -59,6 +59,7 @@ const SIGS: Record<string, string> = {
   'Humanoid.Move': '(self, moveDirection: Vector3, relativeToCamera: boolean?): ()',
   'Humanoid.MoveTo': '(self, location: Vector3, part: BasePart?): ()',
   'Humanoid.GetState': '(self): EnumItem',
+  'Humanoid.Sit': '(self, seat: BasePart?): ()',
   'Lighting.GetMinutesAfterMidnight': '(self): number',
   'Lighting.SetMinutesAfterMidnight': '(self, minutes: number): ()',
   'RunService.IsStudio': '(self): boolean',

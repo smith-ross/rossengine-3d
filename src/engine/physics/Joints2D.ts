@@ -56,7 +56,8 @@ export class Joints2D {
   }
 
   private signature(c: Instance, mover: RAPIER.RigidBody, base: RAPIER.RigidBody) {
-    const keys = ['Mode', 'Speed', 'MaxTorque', 'MaxForce', 'LimitsEnabled', 'LowerAngle', 'UpperAngle', 'LowerLimit', 'UpperLimit', 'FreeLength', 'Stiffness', 'Damping', 'Length', 'End1']
+    // (Speed, MaxTorque and MaxForce are applied every step in drive(), so changing them doesn't rebuild the joint)
+    const keys = ['Mode', 'LimitsEnabled', 'LowerAngle', 'UpperAngle', 'LowerLimit', 'UpperLimit', 'FreeLength', 'Stiffness', 'Damping', 'Length', 'End1']
     return `${mover.handle}|${base.handle}|` + keys.map((k) => (c.classInfo.props.has(k) ? String(c.get(k)) : '')).join('|')
   }
 
@@ -116,26 +117,31 @@ export class Joints2D {
         if (hinge) unit.setLimits(rad(Math.min(lo, hi)) + ref, rad(Math.max(lo, hi)) + ref)
         else unit.setLimits(Math.min(lo, hi) / ppm, Math.max(lo, hi) / ppm)
       }
-      const mode = c.get<EnumItem>('Mode')?.name
-      if (mode === 'Motor' || mode === 'Servo') {
-        unit.setMotorMaxForce(Math.max(0, c.get<number>(hinge ? 'MaxTorque' : 'MaxForce')))
-        if (mode === 'Motor') unit.configureMotorVelocity(hinge ? rad(c.get<number>('Speed')) : c.get<number>('Speed') / ppm, MOTOR_FACTOR)
-      }
     }
     this.entries.set(c, { joint, kind, signature, mover, base, aMover, aBase, axis, ref })
     mover.wakeUp()
   }
 
-  /** Every physics step: servos steer towards their target. */
+  /** Every physics step: motors push (at Speed, up to MaxTorque / MaxForce) and servos steer towards their target. */
   drive() {
     for (const [c, e] of this.entries) {
-      if ((e.kind !== 'HingeConstraint2D' && e.kind !== 'SliderConstraint2D') || c.get<EnumItem>('Mode')?.name !== 'Servo') continue
+      if (e.kind !== 'HingeConstraint2D' && e.kind !== 'SliderConstraint2D') continue
+      const mode = c.get<EnumItem>('Mode')?.name
+      if (mode !== 'Motor' && mode !== 'Servo') continue
       const hinge = e.kind === 'HingeConstraint2D'
+      const unit = e.joint as RAPIER.UnitImpulseJoint
+      unit.setMotorMaxForce(Math.max(0, c.get<number>(hinge ? 'MaxTorque' : 'MaxForce')))
+      if (mode === 'Motor') {
+        const speed = hinge ? rad(c.get<number>('Speed')) : c.get<number>('Speed') / this.ppm()
+        unit.configureMotorVelocity(speed, MOTOR_FACTOR)
+        if (Math.abs(speed) > 1e-4) e.mover.wakeUp()
+        continue
+      }
       let err = hinge ? rad(c.get<number>('TargetAngle') - this.measure(e)) : (c.get<number>('TargetPosition') - this.measure(e)) / this.ppm()
       if (hinge) err = Math.atan2(Math.sin(err), Math.cos(err))
       const max = Math.abs(hinge ? rad(c.get<number>('Speed')) : c.get<number>('Speed') / this.ppm())
       const vel = Math.max(-max, Math.min(max, err * SERVO_GAIN))
-      ;(e.joint as RAPIER.UnitImpulseJoint).configureMotorVelocity(vel, MOTOR_FACTOR)
+      unit.configureMotorVelocity(vel, MOTOR_FACTOR)
       if (Math.abs(vel) > 1e-4) e.mover.wakeUp()
     }
   }

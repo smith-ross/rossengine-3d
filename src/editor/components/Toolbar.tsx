@@ -2,10 +2,10 @@ import { ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
   MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload, Layers,
-  Trash2, Users, Cog,
+  Trash2, Users, Cog, Car, PersonStanding,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { characterControllerTarget, insertCharacterController, insertConstraint, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { characterControllerTarget, insertCar, insertCharacterController, insertConstraint, insertRagdollScript, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
 import { LANGUAGES, ScriptLanguage } from '../../engine/scripting/languages'
 import { ClassIcon } from './icons'
 import { openPlace, savePlace } from '../fileio'
@@ -166,6 +166,16 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
                     <span><ClassIcon cls={cls} /> {label}</span><span className="menu-shortcut">{hint.split(':')[0]}</span>
                   </div>
                 ))}
+                {!in2d && <>
+                  <div className="menu-sep" />
+                  <div className="menu-cat">Built from joints (edit them like anything else)</div>
+                  <div className="menu-item" title="Parts, hinges, sliders and springs, plus a Script and a LocalScript: walk into the seat to drive" onClick={insertCar}>
+                    <span><Car size={13} /> Car</span><span className="menu-shortcut">drive with WASD</span>
+                  </div>
+                  <div className="menu-item" title="A Script in ScriptService: characters that die keep their limbs on ball sockets and hinges" onClick={insertRagdollScript}>
+                    <span><PersonStanding size={13} /> Ragdoll script</span><span className="menu-shortcut">characters flop when they die</span>
+                  </div>
+                </>}
               </div>
             )
           }}

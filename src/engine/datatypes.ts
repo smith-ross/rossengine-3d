@@ -284,7 +284,7 @@ export const Enums: Record<string, string[]> = {
   UserInputState: ['Begin', 'Change', 'End', 'Cancel', 'None'],
   EasingStyle: ['Linear', 'Sine', 'Quad', 'Cubic', 'Quart', 'Quint', 'Exponential', 'Back', 'Bounce', 'Elastic', 'Circular'],
   EasingDirection: ['In', 'Out', 'InOut'],
-  HumanoidStateType: ['Running', 'Jumping', 'Freefall', 'Landed', 'Dead', 'None'],
+  HumanoidStateType: ['Running', 'Jumping', 'Freefall', 'Landed', 'Seated', 'Dead', 'None'],
   TextXAlignment: ['Left', 'Center', 'Right'],
   TextYAlignment: ['Top', 'Center', 'Bottom'],
   Font: ['SourceSans', 'SourceSansBold', 'Gotham', 'GothamBold', 'Arial', 'ArialBold', 'Code', 'Cartoon'],

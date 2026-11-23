@@ -8,6 +8,7 @@ import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
 import { CHARACTER_CONTROLLER } from '../engine/scripting/characterController'
 import { compileRecipe, defaultRecipe } from '../engine/shaderRecipe'
 import { setEnd1, setPivot } from '../engine/constraintClasses'
+import { RAGDOLL_SOURCE, buildCar } from '../engine/kits'
 import { apply, invert, worldPosition, worldXform } from '../engine/classes2d'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
@@ -370,6 +371,52 @@ export function insertConstraint(cls: string): Instance | null {
     }
     editor.selection = [c]
     return c
+  })
+}
+
+/** The top of the highest part under a point (and not far above it), so things can be put down on it. */
+function groundBelow(p: Vector3): number | null {
+  let best: number | null = null
+  for (const d of editor.game.workspace.getDescendants()) {
+    if (!(d instanceof BasePart)) continue
+    const cf = d.cframe, h = d.size.mul(0.5)
+    // the part's world box (from its 8 corners)
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, top = -Infinity
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+      const c = cf.pointToWorld(new Vector3(h.x * sx, h.y * sy, h.z * sz))
+      minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x); minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z); top = Math.max(top, c.y)
+    }
+    if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ || top > p.y + 4) continue
+    if (best === null || top > best) best = top
+  }
+  return best
+}
+
+/** A drivable car (parts, joints and two scripts: see engine/kits.ts) in front of the camera. */
+export function insertCar(): Instance {
+  return editor.mutate(() => {
+    const h = insertHint.position
+    const car = buildCar(CFrame.fromPosition(new Vector3(h.x, groundBelow(h) ?? Math.max(0, h.y - 2), h.z)))
+    car.setParent(editor.game.workspace)
+    editor.selection = [car]
+    editor.log('info', 'Car added: walk into it to get in, drive with W/S and A/D, Space to get out. Tune it with the attributes on the Car model.')
+    return car
+  })
+}
+
+/** The ragdoll Script (characters flop instead of falling apart when they die), once per place. */
+export function insertRagdollScript(): Instance {
+  const svc = editor.game.getService('ScriptService')
+  const existing = svc.findFirstChild('Ragdoll')
+  if (existing && isA(existing.className, 'BaseScript')) { editor.selection = [existing]; editor.openScript(existing); return existing }
+  return editor.mutate(() => {
+    const s = createInstance('Script')
+    s.name = 'Ragdoll'
+    s.set('Source', RAGDOLL_SOURCE)
+    s.setParent(svc)
+    editor.selection = [s]
+    editor.openScript(s)
+    return s
   })
 }
 

@@ -200,9 +200,13 @@ export class Instance {
     if (newDM && oldDM === newDM) newDM.notifyReparented(this, oldParent)
     oldParent?.fire('ChildRemoved', this)
     newParent?.fire('ChildAdded', this)
-    // DescendantAdded/Removing on ancestors
-    for (let a = oldParent; a; a = a.parent) a.fire('DescendantRemoving', this)
-    for (let a = newParent; a; a = a.parent) a.fire('DescendantAdded', this)
+    // DescendantAdded/Removing on ancestors: for this and for everything inside it
+    // (so a script watching for Humanoids sees the one inside a character added as a whole)
+    if (oldParent || newParent) {
+      const moved = [this, ...this.getDescendants()]
+      for (let a = oldParent; a; a = a.parent) for (const d of moved) a.fire('DescendantRemoving', d)
+      for (let a = newParent; a; a = a.parent) for (const d of moved) a.fire('DescendantAdded', d)
+    }
     this.fire('AncestryChanged', this, newParent)
     this.changed('Parent')
   }
