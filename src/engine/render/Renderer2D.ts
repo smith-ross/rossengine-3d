@@ -8,7 +8,8 @@ import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFail
 import { Color3, EnumItem, Vector2 } from '../datatypes'
 import { Instance } from '../instance'
 import { DataModel } from '../classes'
-import { TileMap, Xform, apply, invert, isNode2D, localXform, worldPosition as worldPositionOf } from '../classes2d'
+import { TileMap, Xform, apply, invert, isNode2D, localXform, worldPosition as worldPositionOf, xformRotation } from '../classes2d'
+import { ParticleSystem, arcDirection, readSettings, requestsOf } from './particles'
 import { assets } from '../assets'
 
 const IDENTITY: Xform = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
@@ -45,7 +46,7 @@ function texture(content: string, pixelArt: boolean, onLoad: () => void): THREE.
 }
 const loaded = (t: THREE.Texture | null) => !!t?.image && (t.image as HTMLImageElement).width > 0
 
-const DRAWABLE = new Set(['Sprite2D', 'AnimatedSprite2D', 'TileMap', 'Text2D'])
+const DRAWABLE = new Set(['Sprite2D', 'AnimatedSprite2D', 'TileMap', 'Text2D', 'ParticleEmitter2D'])
 
 interface View {
   inst: Instance
@@ -61,6 +62,8 @@ interface View {
   debug?: THREE.LineLoop
   /** active custom Shader material (replaces the drawable's material) */
   shader?: ShaderMat | null
+  /** ParticleEmitter2D: its particles (drawn in world space, outside the node's group) */
+  particles?: ParticleSystem
 }
 
 export interface Renderer2DOptions {
@@ -159,7 +162,7 @@ export class Renderer2D {
     this.disposeShaderFailed()
     if (this.screen) { for (const p of this.screen.passes) p.pass.dispose(); this.screen.composer.dispose() }
     this.resizeObserver.disconnect()
-    for (const v of this.views.values()) { v.mat?.dispose(); v.shader?.material.dispose(); v.mesh?.geometry !== PLANE && v.mesh?.geometry !== CIRCLE && v.mesh?.geometry.dispose() }
+    for (const v of this.views.values()) { v.particles?.dispose(); v.mat?.dispose(); v.shader?.material.dispose(); v.mesh?.geometry !== PLANE && v.mesh?.geometry !== CIRCLE && v.mesh?.geometry.dispose() }
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
@@ -234,6 +237,7 @@ export class Renderer2D {
       if (v.mesh) v.mesh.renderOrder = v.order
       if (v.mesh && this.frameOverride.has(v.inst)) this.applyFrame(v, this.frameOverride.get(v.inst)!)
     }
+    this.updateParticles()
     this.updateOverlay()
     this.updateShaders()
     const screen = this.screenPasses()
@@ -327,6 +331,7 @@ export class Renderer2D {
     const v = this.views.get(inst)
     if (v) {
       this.scene.remove(v.group)
+      if (v.particles) { this.scene.remove(v.particles.points); v.particles.dispose() }
       v.mat?.dispose()
       v.shader?.material.dispose()
       if (v.mesh && v.mesh.geometry !== PLANE && v.mesh.geometry !== CIRCLE) v.mesh.geometry.dispose()
@@ -348,8 +353,67 @@ export class Renderer2D {
       case 'Sprite2D': case 'AnimatedSprite2D': this.buildSprite(v, mat); break
       case 'TileMap': this.buildTileMap(v as View & { inst: TileMap }, mat); break
       case 'Text2D': this.buildText(v, mat); break
+      case 'ParticleEmitter2D': this.buildEmitter(v); break
     }
     this.applyShader(v)
+  }
+
+  /** An emitter has no picture of its own: just bounds (its emission area) to select and drag it by. */
+  private buildEmitter(v: View) {
+    if (!v.particles) {
+      v.particles = new ParticleSystem(false)
+      this.scene.add(v.particles.points)
+    }
+    const shape = v.inst.get<EnumItem>('EmissionShape')?.name ?? 'Point'
+    const es = v.inst.get<Vector2>('EmissionSize') ?? new Vector2(16, 16)
+    const w = shape === 'Point' ? 16 : Math.max(4, Math.abs(es.x)), h = shape === 'Point' ? 16 : Math.max(4, Math.abs(es.y))
+    v.bounds = { x: -w / 2, y: -h / 2, w, h }
+  }
+
+  private particleClock = performance.now()
+  /** Step and draw every ParticleEmitter2D (in the editor too, so effects can be tuned without playing). */
+  private updateParticles() {
+    const now = performance.now()
+    const dt = Math.min(0.1, (now - this.particleClock) / 1000)
+    this.particleClock = now
+    const pointScale = Math.max(0.01, this.view.zoom) * this.renderer.getPixelRatio()
+    for (const v of this.drawList) {
+      const sys = v.particles
+      if (!sys) continue
+      const inst = v.inst
+      const s = readSettings(inst)
+      const req = requestsOf(inst)
+      if (req.clear) { sys.clear(); req.clear = false }
+      const burst = req.burst
+      req.burst = 0
+      const m = v.world
+      const turn = xformRotation(m), cos = Math.cos(turn), sin = Math.sin(turn)
+      const shape = inst.get<EnumItem>('EmissionShape')?.name ?? 'Point'
+      const es = inst.get<Vector2>('EmissionSize') ?? new Vector2(16, 16)
+      const dir = inst.get<Vector2>('Direction') ?? new Vector2(0, -1)
+      const a = inst.get<Vector2>('Acceleration') ?? new Vector2(0, 0)
+      // world acceleration; in the node's own space when the particles move with it
+      const accel = s.locked ? new THREE.Vector3(a.x * cos + a.y * sin, -a.x * sin + a.y * cos, 0) : new THREE.Vector3(a.x, a.y, 0)
+      sys.step(dt, s, accel, (p, vel) => {
+        if (shape === 'Rectangle') p.set((Math.random() - 0.5) * es.x, (Math.random() - 0.5) * es.y, 0)
+        else if (shape === 'Circle') {
+          const r = Math.sqrt(Math.random()) / 2, t = Math.random() * Math.PI * 2
+          p.set(Math.cos(t) * r * es.x, Math.sin(t) * r * es.y, 0)
+        } else p.set(0, 0, 0)
+        vel.copy(arcDirection(dir, s.spread))
+        if (!s.locked) {
+          const w = apply(m, p.x, p.y)
+          p.set(w.x, w.y, 0)
+          vel.set(vel.x * cos - vel.y * sin, vel.x * sin + vel.y * cos, 0)
+        }
+      }, burst)
+      toMatrix(s.locked ? m : IDENTITY, sys.points.matrix)
+      sys.points.matrixWorldNeedsUpdate = true
+      sys.points.renderOrder = v.order
+      sys.points.visible = v.group.visible
+      sys.setTexture(s.texture, s.texture ? texture(s.texture, !!inst.get<boolean>('PixelArt'), () => {}) : null)
+      sys.write(s, pointScale)
+    }
   }
 
   private setMesh(v: View, geo: THREE.BufferGeometry) {
@@ -664,7 +728,8 @@ export class Renderer2D {
   /** Topmost node under a world point. */
   pick(p: Vector2, ignore?: (i: Instance) => boolean): Instance | null {
     const candidates: Array<{ inst: Instance; order: number }> = []
-    for (const v of this.drawList) if (v.group.visible) candidates.push({ inst: v.inst, order: v.order })
+    // emitters can be picked in the editor (to select and drag them), not by the game's mouse
+    for (const v of this.drawList) if (v.group.visible && (this.opts.editor || !v.particles)) candidates.push({ inst: v.inst, order: v.order })
     for (const [n] of this.nodes) if (n.isA('PhysicsBody2D') && !this.views.has(n)) candidates.push({ inst: n, order: -1 })
     candidates.sort((a, b) => b.order - a.order)
     for (const { inst } of candidates) {

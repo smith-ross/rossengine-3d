@@ -178,11 +178,14 @@ export class GameSession implements Runtime, Runtime2D {
   }
 
   // ------------------------------------------------------------------ scripts
-  /** Scripts run in the Workspace, ScriptService and under Players (GUIs, characters). Storage, StarterGui etc. hold templates. */
+  /**
+   * Scripts run in the Workspace, World2D (inside 2D objects, like scripts in parts), ScriptService and
+   * under Players (GUIs, characters). Storage, StarterGui etc. hold templates.
+   */
   private scriptLocationOk(s: Instance) {
     if (s.className !== 'Script') return false
     const g = this.game
-    return s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('ScriptService')) || s.isDescendantOf(g.getService('Players'))
+    return s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('World2D')) || s.isDescendantOf(g.getService('ScriptService')) || s.isDescendantOf(g.getService('Players'))
   }
 
   private maybeRunScript(s: Instance) {

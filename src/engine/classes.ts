@@ -4,6 +4,7 @@ import { register2DClasses } from './classes2d'
 import type { SaveStore } from './save'
 import { listMap } from './tables'
 import { DEFAULT_SCREEN_SHADER_SOURCE, DEFAULT_SHADER_SOURCE } from './shaderDefaults'
+import { emitterMethods, emitterProps } from './particleClasses'
 import {
   DataModelLike, DataModelObserver, Instance, createInstance, defineClass, getClass, isA, setEnumResolver,
 } from './instance'
@@ -475,6 +476,14 @@ class SpotLight extends Light {}
 defineClass(SpotLight, {
   name: 'SpotLight', superclass: 'Light', category: 'Lights',
   props: { Angle: { type: 'number', default: () => 90, category: 'Data' }, Face: { type: 'Enum.NormalId', default: () => enumItem('NormalId', 'Front'), category: 'Data' } },
+})
+
+/** Particles that stream out of the part it is inside (drawn by the renderer; see render/particles.ts). */
+class ParticleEmitter extends Instance {}
+defineClass(ParticleEmitter, {
+  name: 'ParticleEmitter', superclass: 'Instance', category: 'Effects',
+  props: emitterProps('3d'),
+  methods: emitterMethods,
 })
 
 class Sound extends Instance {}

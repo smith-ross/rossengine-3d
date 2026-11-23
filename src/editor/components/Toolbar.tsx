@@ -118,7 +118,7 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
               {[
                 ['Sprite2D', 'Sprite'], ['AnimatedSprite2D', 'Animated Sprite'], ['TileMap', 'Tile Map'], ['CharacterBody2D', 'Character Body'],
                 ['RigidBody2D', 'Rigid Body'], ['StaticBody2D', 'Static Body'], ['Area2D', 'Area (trigger)'], ['Camera2D', 'Camera'],
-                ['Text2D', 'Text'], ['Node2D', 'Node (group)'], ['SpriteAnimation', 'Sprite Animation'],
+                ['Text2D', 'Text'], ['ParticleEmitter2D', 'Particles'], ['Node2D', 'Node (group)'], ['SpriteAnimation', 'Sprite Animation'],
               ].map(([cls, label]) => (
                 <div key={cls} className="menu-item" onClick={() => insertObject(cls)}><span><ClassIcon cls={cls} /> {label}</span><span className="menu-shortcut">{cls}</span></div>
               ))}

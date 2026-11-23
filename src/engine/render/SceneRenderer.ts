@@ -9,6 +9,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { assets } from '../assets'
 import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { ParticleSystem, coneDirection, readSettings, requestsOf } from './particles'
 import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFailed, setPassMaterial, shaderMaterial, updateShaderUniforms } from './shaders'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
@@ -94,6 +95,8 @@ export class SceneRenderer {
   private views = new Map<Instance, PartView>()
   private lights = new Map<Instance, THREE.Light>()
   private decals = new Map<Instance, THREE.Mesh>()
+  private particles = new Map<Instance, ParticleSystem>()
+  private particleClock = performance.now()
   private selectionBoxes = new Map<Instance, THREE.Box3Helper>()
   private hoverBox: THREE.Box3Helper
   private hovered: Instance | null = null
@@ -222,6 +225,7 @@ export class SceneRenderer {
     } else this.hoverBox.visible = false
     this.updateRigs()
     this.updateShaders()
+    this.updateParticles()
     const screen = this.screenPasses()
     if (screen) screen.composer.render()
     else this.renderer.render(this.scene, this.camera)
@@ -300,6 +304,48 @@ export class SceneRenderer {
     const b = v?.bones?.get(inst) ?? null
     if (b) b.updateWorldMatrix(true, false)
     return b
+  }
+
+  // ------------------------------------------------------------------ particles
+  /** Step and draw every ParticleEmitter (in the editor too, so effects can be tuned without playing). */
+  private updateParticles() {
+    const now = performance.now()
+    const dt = Math.min(0.1, (now - this.particleClock) / 1000)
+    this.particleClock = now
+    if (!this.particles.size) return
+    // Size in studs -> pixels at distance 1
+    const pointScale = this.renderer.getDrawingBufferSize(new THREE.Vector2()).y / (2 * Math.tan((this.camera.fov * Math.PI) / 360))
+    for (const [inst, sys] of this.particles) {
+      const part = inst.parent as BasePart
+      const s = readSettings(inst)
+      const req = requestsOf(inst)
+      if (req.clear) { sys.clear(); req.clear = false }
+      const burst = req.burst
+      req.burst = 0
+      const m = part.cframe.toMatrix4(new THREE.Matrix4())
+      const rot = new THREE.Matrix3().setFromMatrix4(m)
+      const size = part.size
+      const ball = part.className === 'Part' && part.get<EnumItem>('Shape')?.name === 'Ball'
+      const shape = inst.get<EnumItem>('EmissionShape')?.name ?? 'Volume'
+      const d = inst.get<Vector3>('Direction') ?? new Vector3(0, 1, 0)
+      const dir = new THREE.Vector3(d.x, d.y, d.z)
+      const a = inst.get<Vector3>('Acceleration') ?? new Vector3(0, 0, 0)
+      const accel = new THREE.Vector3(a.x, a.y, a.z)
+      if (s.locked) accel.applyMatrix3(rot.clone().transpose()) // world acceleration in the part's space
+      sys.step(dt, s, accel, (p, v) => {
+        sampleShape3D(shape, size, ball, p)
+        coneDirection(dir, s.spread, v)
+        if (!s.locked) { p.applyMatrix4(m); v.applyMatrix3(rot) }
+      }, burst)
+      if (s.locked) sys.points.matrix.copy(m)
+      else sys.points.matrix.identity()
+      sys.points.matrixWorldNeedsUpdate = true
+      sys.points.visible = !this.hidden.has(part)
+      sys.setTexture(s.texture, s.texture ? loadTexture(s.texture) : null)
+      const cam = this.camera.position.clone()
+      if (s.locked) cam.applyMatrix4(m.clone().invert())
+      sys.write(s, pointScale, cam)
+    }
   }
 
   // ------------------------------------------------------------------ custom shaders
@@ -402,6 +448,7 @@ export class SceneRenderer {
     this.disposeShaderFailed()
     this.resizeObserver.disconnect()
     for (const v of this.views.values()) { v.material.dispose(); v.shader?.material.dispose() }
+    for (const ps of this.particles.values()) ps.dispose()
     if (this.screen) { for (const p of this.screen.passes) p.pass.dispose(); this.screen.composer.dispose() }
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -419,7 +466,7 @@ export class SceneRenderer {
   }
 
   private add(inst: Instance) {
-    if (this.views.has(inst) || this.lights.has(inst) || this.decals.has(inst)) return
+    if (this.views.has(inst) || this.lights.has(inst) || this.decals.has(inst) || this.particles.has(inst)) return
     if (inst instanceof BasePart) {
       if (!this.inWorkspace(inst)) return
       const material = new THREE.MeshStandardMaterial()
@@ -453,6 +500,14 @@ export class SceneRenderer {
       this.decals.set(inst, m)
       this.scene.add(m)
       this.updateDecal(inst)
+      return
+    }
+    if (inst.className === 'ParticleEmitter') {
+      // emits from the part it is inside
+      if (!(inst.parent instanceof BasePart) || !this.inWorkspace(inst)) return
+      const sys = new ParticleSystem(true)
+      this.particles.set(inst, sys)
+      this.scene.add(sys.points)
       return
     }
     if (inst.isA('Light') && inst.parent instanceof BasePart && this.inWorkspace(inst)) {
@@ -498,6 +553,8 @@ export class SceneRenderer {
       l.dispose()
       this.lights.delete(inst)
     }
+    const ps = this.particles.get(inst)
+    if (ps) { this.scene.remove(ps.points); ps.dispose(); this.particles.delete(inst) }
     const b = this.selectionBoxes.get(inst)
     if (b) { this.scene.remove(b); this.selectionBoxes.delete(inst) }
     if (this.hovered === inst) this.hovered = null
@@ -813,3 +870,25 @@ function makeSky() {
   return mesh
 }
 
+/** A random point on (or in) the part, in its own space: the box, a ball, or its centre. */
+function sampleShape3D(shape: string, size: Vector3, ball: boolean, out: THREE.Vector3) {
+  if (shape === 'Point') return out.set(0, 0, 0)
+  if (ball) {
+    const r = Math.min(size.x, size.y, size.z) / 2
+    out.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1)
+    while (out.lengthSq() > 1 || out.lengthSq() < 1e-6) out.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1)
+    if (shape === 'Surface') out.normalize()
+    return out.multiplyScalar(r)
+  }
+  const hx = size.x / 2, hy = size.y / 2, hz = size.z / 2
+  out.set((Math.random() * 2 - 1) * hx, (Math.random() * 2 - 1) * hy, (Math.random() * 2 - 1) * hz)
+  if (shape === 'Surface') {
+    // pick a face, weighted by its area, and push the point onto it
+    const ax = size.y * size.z, ay = size.x * size.z, az = size.x * size.y
+    const r = Math.random() * (ax + ay + az), side = Math.random() < 0.5 ? -1 : 1
+    if (r < ax) out.x = hx * side
+    else if (r < ax + ay) out.y = hy * side
+    else out.z = hz * side
+  }
+  return out
+}

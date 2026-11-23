@@ -119,6 +119,21 @@ export function insertObject(className: string, parent?: Instance): Instance {
       inst.set('Position', new Vector2(Math.round(view2d.x), Math.round(view2d.y)))
     }
     if (className === 'Camera2D') editor.game.getService('World2D').set('CurrentCamera', inst)
+    if (className === 'ParticleEmitter' && !((parent ?? defaultParentFor(className)) instanceof BasePart)) {
+      // particles stream out of a part: with no part selected, make an invisible one to hold them
+      const holder = createInstance('Part')
+      holder.name = 'Particles'
+      const p = insertHint.position
+      holder.set('Anchored', true)
+      holder.set('CanCollide', false)
+      holder.set('Transparency', 1)
+      holder.set('Size', new Vector3(2, 1, 2))
+      holder.set('CFrame', CFrame.fromPosition(new Vector3(Math.round(p.x), Math.round(p.y) + 0.5, Math.round(p.z))))
+      holder.setParent(editor.game.workspace)
+      inst.setParent(holder)
+      editor.selection = [inst]
+      return inst
+    }
     if (className === 'Frame' || className === 'TextLabel' || className === 'TextButton' || className === 'TextBox' || className === 'ImageLabel') {
       const p = parent ?? defaultParentFor(className)
       if (!(p.className === 'ScreenGui' || p.isA('GuiObject'))) {

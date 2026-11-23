@@ -400,3 +400,11 @@ select.prop-input { background: var(--panel); }
 .anim-end { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-2); pointer-events: none; }
 .anim-nth { color: var(--muted); font-size: 10px; }
 .vp2d-camlabel { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; white-space: nowrap; font-size: 11px; color: #1d1608; background: #ffc94a; padding: 1px 6px; border-radius: 3px; }
+
+/* particle emitter tools (Properties) */
+.particle-tools { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.particle-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.particle-actions { display: flex; gap: 4px; }
+.particle-tools button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; font-size: 11px; background: var(--panel-3); border: 1px solid var(--border-2); border-radius: 4px; cursor: pointer; }
+.particle-tools button:hover:not(:disabled) { border-color: var(--accent); }
+.particle-tools button:disabled { opacity: 0.5; cursor: default; }

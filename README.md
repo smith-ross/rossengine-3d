@@ -63,7 +63,7 @@ tools/                 player packaging and the editor's build-server plugin
 
 Games run entirely on the player's machine, so there is no server/client split:
 
-- **Script** runs when it is in Workspace, ScriptService, or under Players (for example a copy in PlayerGui or a character).
+- **Script** runs when it is in Workspace, World2D (for example inside a sprite), ScriptService, or under Players (for example a copy in PlayerGui or a character).
 - **ModuleScript** is loaded with `require`.
 - **Storage** holds modules and templates. Scripts inside it do not run.
 - **StarterGui** is copied into the player's PlayerGui, and **StarterCharacterScripts** into each character.
@@ -160,6 +160,7 @@ Turn **World2D → Enabled** on (or start from **New 2D Place** / **2D Platforme
 | `Area2D` | A trigger. Fires `BodyEntered`/`BodyExited`. |
 | `Camera2D` | Follows a target, with smoothing, zoom and offset. Has `ScreenToWorld`/`WorldToScreen`. |
 | `Text2D` | Text in the world, with an outline. |
+| `ParticleEmitter2D` | Streams particles (fire, smoke, sparks…) from its position. See [Particles](#particles). |
 
 Terrain modes:
 - `Block3x3`: 9 tiles in this order: top-left, top, top-right, left, centre, right, bottom-left, bottom, bottom-right.
@@ -292,6 +293,31 @@ door.Speed = 2               -- door.Playing, door.CurrentAnimation, door.TimePo
 - **Relative positions:** part positions inside a model are stored relative to the model (its PrimaryPart, or its centre). A copy of an animated model animates wherever you put it.
 - **2D:** positions are already relative to the parent node.
 - **Events:** `Played`, `Stopped` and `Ended` (when a non-looping animation finishes).
+
+## Particles
+
+Particle effects work the same way in 3D and 2D:
+- **3D:** put a `ParticleEmitter` inside a part (Insert → Object → Effects). It streams particles out of the part's volume, its surface, or its centre (`EmissionShape`). With no part selected, inserting one also makes an invisible part to hold it.
+- **2D:** insert a `ParticleEmitter2D` from the **2D** menu. It is a 2D object, so you can move it, rotate it, give it a `ZIndex`, or put it inside a sprite to follow it. It emits from a point, a rectangle or a circle (`EmissionShape`, `EmissionSize`).
+
+Emitters run live in the editor, so you can tune them without pressing Play. The **Particle presets** in the Properties panel set one up as sparkles, fire, smoke, snow, a burst or a magic swirl, and **Emit 20** fires a test burst.
+
+| Property | What it does |
+| --- | --- |
+| `Rate`, `Lifetime`, `LifetimeVariation`, `MaxParticles` | How many particles come out each second, and how long each one lasts (in seconds). |
+| `Speed`, `SpeedVariation`, `Direction`, `SpreadAngle` | Which way they fly. Direction is in the emitter's own space: up by default. SpreadAngle widens it into a cone, and 180 means every way. |
+| `Acceleration`, `Drag` | A steady push (gravity, wind or rising heat) and slowing down. |
+| `Color` → `ColorEnd`, `Size` → `SizeEnd`, `Transparency` → `TransparencyEnd` | How each particle changes over its life. Sizes are in studs in 3D and pixels in 2D. |
+| `Texture`, `Spin`, `RandomRotation`, `Glow` | An image instead of the soft dot, turning, and glowing (light-adding) particles for fire, sparks and magic. |
+| `LockedToEmitter` | Particles move along with the emitter instead of trailing behind it. |
+
+Scripts can fire bursts with `Emit` and remove what's out with `Clear`:
+
+```lua
+local sparks = workspace.Chest.ParticleEmitter
+sparks.Enabled = false      -- only bursts
+sparks:Emit(40)             -- e.g. when the chest opens
+```
 
 ## Saving data
 

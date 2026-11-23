@@ -2,6 +2,7 @@
 // Coordinates are pixels with y pointing down; rotations are degrees, clockwise.
 import { Color3, EnumItem, Vector2, enumItem } from './datatypes'
 import { Instance, defineClass, isA } from './instance'
+import { emitterMethods, emitterProps } from './particleClasses'
 
 /** Provided by the running game (GameSession) for methods that need physics or the viewport. */
 export interface Runtime2D {
@@ -226,6 +227,9 @@ class CharacterBody2D extends PhysicsBody2D {}
 
 class Area2D extends PhysicsBody2D {}
 
+/** Particles that stream out of this node (drawn by Renderer2D; see render/particles.ts). */
+export class ParticleEmitter2D extends Node2D {}
+
 
 /** Called once from classes.ts after the base classes exist (avoids import-order problems). */
 let registered = false
@@ -388,6 +392,11 @@ export function register2DClasses() {
       IsOnWall: (self: Instance) => rt2d(self).bodyState(self).wall,
       IsOnCeiling: (self: Instance) => rt2d(self).bodyState(self).ceiling,
     },
+  })
+  defineClass(ParticleEmitter2D, {
+    name: 'ParticleEmitter2D', superclass: 'Node2D', category: '2D',
+    props: emitterProps('2d'),
+    methods: emitterMethods,
   })
   defineClass(Area2D, {
     name: 'Area2D', superclass: 'PhysicsBody2D', category: '2D',

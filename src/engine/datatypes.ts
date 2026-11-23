@@ -292,6 +292,8 @@ export const Enums: Record<string, string[]> = {
   TerrainMode: ['Block3x3', 'Block3x3Inner', 'Cardinal16'],
   RaycastFilterType: ['Exclude', 'Include', 'Blacklist', 'Whitelist'],
   NormalId: ['Top', 'Bottom', 'Front', 'Back', 'Left', 'Right'],
+  ParticleShape: ['Volume', 'Surface', 'Point'],
+  ParticleShape2D: ['Point', 'Rectangle', 'Circle'],
 }
 
 const enumCache = new Map<string, EnumItem>()

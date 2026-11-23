@@ -24,6 +24,7 @@ const ICONS: Record<string, [LucideIcon, string]> = {
   Tween: [Waves, '#c0c4cc'], InputObject: [Pointer, '#c0c4cc'],
   World2D: [Layers, '#5ad1c9'], Node2D: [Move, '#5ad1c9'], Sprite2D: [ImageIcon, '#5ad1c9'], AnimatedSprite2D: [Film, '#5ad1c9'],
   SpriteAnimation: [Clapperboard, '#5ad1c9'], TileTerrain: [Grid3x3, '#57c26a'], TileMap: [Grid3x3, '#e7b85a'], Camera2D: [Video, '#5ad1c9'], Text2D: [Type, '#5ad1c9'],
+  ParticleEmitter: [Sparkles, '#ffb44a'], ParticleEmitter2D: [Sparkles, '#5ad1c9'],
   StaticBody2D: [SquareIcon, '#4adf7a'], RigidBody2D: [Box, '#4adf7a'], CharacterBody2D: [PersonStanding, '#4adf7a'], Area2D: [Scan, '#ffc04a'],
 }
 

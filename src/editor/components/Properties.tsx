@@ -7,6 +7,7 @@ import { AssetKind, assets, contentRef } from '../../engine/assets'
 import { importFiles, pickFiles } from '../assetOps'
 import { useAssets } from './AssetsPanel'
 import { SpriteTools } from './SpriteTools'
+import { ParticleTools } from './ParticleTools'
 
 const collapsed = new Set<string>()
 
@@ -60,6 +61,7 @@ export function Properties() {
           </div>
         ))}
         {sel.length === 1 && ['Sprite2D', 'AnimatedSprite2D', 'SpriteAnimation'].includes(first.className) && <SpriteTools inst={first} />}
+        {sel.length === 1 && (first.className === 'ParticleEmitter' || first.className === 'ParticleEmitter2D') && <ParticleTools inst={first} />}
         <Attributes inst={first} />
       </div>
     </div>
