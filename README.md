@@ -225,6 +225,41 @@ vec3 vertex() {   // optional: local position, before Size scaling
 - **Errors:** compile errors appear as squiggles while you type, and in **Output** as `Workspace.Part.Shader:6: …` (click to jump to the line). A shader that doesn't compile falls back to the object's normal material.
 - **Limitations:** custom shaders don't receive shadows, and skinned meshes draw in their rest pose.
 
+## Animation
+
+Animate any property of an object, or of anything inside a model: position, rotation, size, colour, transparency, light brightness, GUI positions, 2D sprites, and more.
+
+### In the editor
+
+1. **Create:** select a part, model or 2D object, then use **Insert → AnimationPlayer** (or **Animate "…"** in the **Animation** tab at the bottom). This creates an `AnimationPlayer` with one `Animation` inside, and opens the Animation editor.
+2. **Record:** move the playhead, then change the object with the Move, Rotate or Scale tools, or in the Properties panel. While **Recording changes** is on, every change becomes a keyframe at the playhead. A property's first change also adds a key at 0 seconds with its starting value.
+3. **Edit keyframes:**
+   - drag keys to retime them;
+   - Shift+click to select several, and Delete to remove them;
+   - right-click a key to choose its easing (Linear, Constant, Sine, Quad, Cubic, Back, Bounce or Elastic, easing in, out or both);
+   - double-click a track to add a key there;
+   - use **Key all** to key every track at the playhead.
+4. **Settings:** set the length, **Loop**, and **Play on start** (the AnimationPlayer's `Autoplay`). Add more animations (such as "Open" and "Close") from the animation list.
+
+Other behaviour:
+- **Preview** with the Play button or Space.
+- **The starting pose is what gets saved:** the preview only shows while the Animation tab is open, so saving, Play and duplicating always use the objects' real values.
+- **Editing the starting pose:** turn **Recording changes** off.
+
+### At runtime
+
+```lua
+local door = workspace.Gate.AnimationPlayer
+door:Play("Open")            -- or door:Play() for the current/first animation
+door.Ended:Connect(function(name) print(name, "finished") end)
+door:Pause()  door:Resume()  door:Seek(0.5)  door:Stop()
+door.Speed = 2               -- door.Playing, door.CurrentAnimation, door.TimePosition
+```
+
+- **Relative positions:** part positions inside a model are stored relative to the model (its PrimaryPart, or its centre). A copy of an animated model animates wherever you put it.
+- **2D:** positions are already relative to the parent node.
+- **Events:** `Played`, `Stopped` and `Ended` (when a non-looping animation finishes).
+
 ## Assets
 
 Sounds, images and 3D models are imported from files and saved inside the place file, so a game never needs an external ID or URL.

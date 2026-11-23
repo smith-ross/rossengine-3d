@@ -1,3 +1,4 @@
+import { animEditor } from '../animation/animEditor'
 import { isCode } from '../ops'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Instance, allClasses } from '../../engine/instance'
@@ -121,6 +122,7 @@ export function Explorer() {
               onClick={(e) => onRowClick(e, inst)}
               onDoubleClick={() => {
                 if (isCode(inst)) editor.openScript(inst)
+                else if (inst.className === 'AnimationPlayer' || inst.className === 'Animation') openAnimation(inst)
                 else if (!ed.playing) setRenaming(inst)
               }}
               onContextMenu={(e) => {
@@ -268,4 +270,13 @@ export function InsertMenu({ parent, onDone, inline }: { parent?: Instance; onDo
       </div>
     </div>
   )
+}
+
+/** Open an AnimationPlayer (or one of its Animations) in the Animation editor. */
+function openAnimation(inst: Instance) {
+  const player = inst.className === 'Animation' ? inst.parent : inst
+  if (!player) return
+  editor.bottomTab = 'animation'
+  animEditor.open(player, inst.className === 'Animation' ? inst.name : null)
+  editor.emit()
 }

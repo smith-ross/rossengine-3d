@@ -18,6 +18,7 @@ import { languageOf } from '../scripting/languages'
 import { Renderer2D } from '../render/Renderer2D'
 import { Physics2D, initPhysics2D } from '../physics/Physics2D'
 import { Animator2D } from './Animator2D'
+import { AnimationRunner } from '../animation'
 import { Runtime2D, isNode2D, setWorldPosition, worldPosition } from '../classes2d'
 import { assets } from '../assets'
 
@@ -38,6 +39,7 @@ export class GameSession implements Runtime, Runtime2D {
   r2d: Renderer2D | null = null
   phys2d: Physics2D | null = null
   private animator = new Animator2D()
+  private animations = new AnimationRunner((inst, event, ...args) => inst.fire(event, ...args))
   scripts!: ScriptHost
   gui!: GuiRenderer
   private tweens = new TweenManager()
@@ -136,6 +138,8 @@ export class GameSession implements Runtime, Runtime2D {
     for (const d of ws.getDescendants()) this.maybeControl(d)
     // 3. the local player joins
     this.addPlayer()
+    // 4. AnimationPlayers set to Autoplay
+    this.animations.autoplay(game.getDescendants().filter((d) => d.className === 'AnimationPlayer'))
 
     const loop = this.r2d ?? this.renderer
     loop.onBeforeRender = (dt) => this.frame(dt)
@@ -302,6 +306,7 @@ export class GameSession implements Runtime, Runtime2D {
     }
     this.checkDeaths()
     this.tweens.update(dt)
+    this.animations.update(dt)
     // debris
     if (this.debris.length) {
       const due = this.debris.filter((d) => d.at <= this.gameTime)
@@ -616,6 +621,16 @@ export class GameSession implements Runtime, Runtime2D {
     this.stop()
   }
   time() { return this.gameTime }
+
+  animationControl(player: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume' | 'Seek', arg?: unknown) {
+    switch (action) {
+      case 'Play': this.animations.play(player, arg as string | null); break
+      case 'Stop': this.animations.stop(player); break
+      case 'Pause': this.animations.pause(player); break
+      case 'Resume': this.animations.resume(player); break
+      case 'Seek': this.animations.seek(player, Number(arg) || 0); break
+    }
+  }
 
   soundControl(sound: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume') {
     let a = this.sounds.get(sound)

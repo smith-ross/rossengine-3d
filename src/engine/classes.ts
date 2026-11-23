@@ -27,6 +27,7 @@ export interface Runtime {
   humanoidMoveTo(h: Instance, pos: Vector3): void
   humanoidJump(h: Instance): void
   soundControl(sound: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume'): void
+  animationControl(player: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume' | 'Seek', arg?: unknown): void
   kick(player: Instance, message: string): void
   time(): number
 }
@@ -461,6 +462,41 @@ defineClass(Sound, {
     Resume: (self: Instance) => rt(self).soundControl(self, 'Resume'),
   },
   events: ['Ended', 'Played'],
+})
+
+// ---- Animation ---------------------------------------------------------------
+/** Keyframes for any properties of the AnimationPlayer's parent and the objects inside it. */
+export class Animation extends Instance {}
+defineClass(Animation, {
+  name: 'Animation', superclass: 'Instance', category: 'Animation',
+  props: {
+    Length: { type: 'number', default: () => 2, category: 'Animation' },
+    Looped: { type: 'bool', category: 'Animation' },
+    /** keyframe tracks (JSON), edited in the Animation editor */
+    Tracks: { type: 'string', hidden: true },
+  },
+})
+/** Plays the Animations inside it on its parent (a part, model, 2D node or anything else). */
+export class AnimationPlayer extends Instance {}
+defineClass(AnimationPlayer, {
+  name: 'AnimationPlayer', superclass: 'Instance', category: 'Animation',
+  props: {
+    Autoplay: { type: 'string', category: 'Animation' },
+    Speed: { type: 'number', default: () => 1, category: 'Animation' },
+    Playing: { type: 'bool', noSave: true, readonly: true, category: 'Animation' },
+    CurrentAnimation: { type: 'string', noSave: true, category: 'Animation' },
+    TimePosition: { type: 'number', noSave: true, readonly: true, category: 'Animation' },
+  },
+  methods: {
+    Play: (self: Instance, name?: unknown) => rt(self).animationControl(self, 'Play', name == null ? null : String(name)),
+    Stop: (self: Instance) => rt(self).animationControl(self, 'Stop'),
+    Pause: (self: Instance) => rt(self).animationControl(self, 'Pause'),
+    Resume: (self: Instance) => rt(self).animationControl(self, 'Resume'),
+    Seek: (self: Instance, time: unknown) => rt(self).animationControl(self, 'Seek', Number(time)),
+    GetAnimation: (self: Instance, name: unknown) => self.children.find((c) => c.className === 'Animation' && c.name === String(name)) ?? null,
+    GetAnimations: (self: Instance) => self.children.filter((c) => c.className === 'Animation'),
+  },
+  events: ['Played', 'Stopped', 'Ended'],
 })
 
 // ---- Scripts -----------------------------------------------------------------

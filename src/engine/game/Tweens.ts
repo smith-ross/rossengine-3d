@@ -25,7 +25,7 @@ function bounceOut(t: number) {
   if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375
   return n * (t -= 2.625 / d) * t + 0.984375
 }
-function ease(style: string, dir: string, t: number) {
+export function ease(style: string, dir: string, t: number) {
   const f = styles[style] ?? styles.Quad
   if (dir === 'In') return f(t)
   if (dir === 'Out') return 1 - f(1 - t)

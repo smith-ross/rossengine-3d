@@ -91,6 +91,14 @@ export function insertObject(className: string, parent?: Instance): Instance {
       }
     }
     inst.setParent(parent ?? defaultParentFor(className))
+    if (className === 'AnimationPlayer') {
+      // ready to animate: one Animation inside, and the Animation editor opens on it
+      const a = createInstance('Animation')
+      a.name = 'Animation'
+      a.setParent(inst)
+      editor.bottomTab = 'animation'
+      void import('./animation/animEditor').then(({ animEditor }) => animEditor.open(inst))
+    }
     if (className === 'Shader' || className === 'ScreenShader') {
       // new shaders start as visual steps (no GLSL knowledge needed); "Convert to code" switches to GLSL
       const kind = className === 'ScreenShader' ? 'screen' : inst.parent && /2D$|^TileMap$/.test(inst.parent.className) ? '2d' : '3d'
@@ -133,17 +141,14 @@ export function duplicateSelection() {
   const sel = topLevelSelection()
   if (!sel.length) return
   editor.mutate(() => {
-    const copies = sel.map((s) => {
-      const c = s.clone()
-      c.setParent(s.parent)
-      return c
-    })
+    // copies get the objects' real values, not an animation pose being previewed
+    const copies = editor.withRestPose(() => sel.map((s) => s.clone())).map((c, i) => { c.setParent(sel[i].parent); return c })
     editor.selection = copies
   })
 }
 
 export function copySelection() {
-  clipboard = topLevelSelection().map((s) => serialize(s))
+  clipboard = editor.withRestPose(() => topLevelSelection().map((s) => serialize(s)))
 }
 
 export function cutSelection() {

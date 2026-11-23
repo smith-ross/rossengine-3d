@@ -58,7 +58,21 @@ class EditorStore {
   private redoStack: SerializedInstance[] = []
   private unobserve: (() => void) | null = null
   revealLine: { script: Instance; line: number } | null = null
-  bottomTab: 'output' | 'assets' = 'output'
+  bottomTab: 'output' | 'assets' | 'animation' = 'output'
+  /**
+   * Set by the Animation editor while it shows a pose: saving, undo snapshots and Play must see the
+   * objects' real (rest) values, not the previewed pose.
+   */
+  poseGuard: { restore(): void; reapply(): void } | null = null
+  /** Run fn with the animation preview taken off (objects at their real values). */
+  withRestPose<T>(fn: () => T): T {
+    const g = this.poseGuard
+    if (!g) return fn()
+    g.restore()
+    try { return fn() } finally { g.reapply() }
+  }
+  /** serialize the edit tree with the animation preview taken off */
+  private snapshot(): SerializedInstance { return this.withRestPose(() => serialize(this.game)) }
 
   /** true until the user picks/opens a place this session (shows the start screen) */
   showStart = true
@@ -165,7 +179,7 @@ class EditorStore {
 
   // ------------------------------------------------------------------ files
   toFile(): PlaceFile {
-    return { format: 'rossengine-place', version: 2, name: this.placeName, settings: this.settings, root: serialize(this.game), assets: assets.serialize() }
+    return { format: 'rossengine-place', version: 2, name: this.placeName, settings: this.settings, root: this.snapshot(), assets: assets.serialize() }
   }
 
   private fromFile(file: PlaceFile): DataModel {
@@ -234,7 +248,7 @@ class EditorStore {
   /** Record an undo point before mutating the edit DataModel. */
   checkpoint() {
     if (this.playing) return
-    this.undoStack.push(serialize(this.game))
+    this.undoStack.push(this.snapshot())
     if (this.undoStack.length > 60) this.undoStack.shift()
     this.redoStack = []
   }
@@ -256,7 +270,7 @@ class EditorStore {
     if (this.playing) return
     const snap = from.pop()
     if (!snap) return
-    to.push(serialize(this.game))
+    to.push(this.snapshot())
     const selectedIds = this.selection.map((s) => s.id)
     const openIds = this.tabs.map((t) => t.id)
     const activeId = this.activeTab?.id
@@ -311,7 +325,7 @@ class EditorStore {
     const { GameSession } = await import('../engine/game/GameSession')
     try {
       this.log('system', 'Starting game…')
-      const session = await GameSession.start(this.playContainer, serialize(this.game), {
+      const session = await GameSession.start(this.playContainer, this.snapshot(), {
         output: (kind, message, source) => this.log(kind, message, source),
       })
       this.session = session

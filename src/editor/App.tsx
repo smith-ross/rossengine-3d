@@ -9,6 +9,8 @@ import { Output } from './components/Output'
 import { AssetsPanel, useAssets } from './components/AssetsPanel'
 import { ScriptEditor } from './components/ScriptEditor'
 import { VisualShaderEditor } from './shaders/VisualShaderEditor'
+import { AnimationPanel } from './animation/AnimationPanel'
+import { Clapperboard } from 'lucide-react'
 
 /** a Shader/ScreenShader made of visual steps (rather than GLSL) */
 const isVisualShader = (i: { className: string; get: <T>(k: string) => T }) => (i.className === 'Shader' || i.className === 'ScreenShader') && !!i.get<string>('Recipe')
@@ -116,7 +118,7 @@ export function App() {
           <Splitter dir="y" onDrag={(d) => setLayout((l) => ({ ...l, bottom: clamp(l.bottom - d, 60, window.innerHeight * 0.7) }))} />
           <div className="bottom" style={{ height: layout.bottom }}>
             <BottomTabs />
-            {ed.bottomTab === 'output' ? <Output /> : <AssetsPanel />}
+            {ed.bottomTab === 'output' ? <Output /> : ed.bottomTab === 'animation' ? <AnimationPanel /> : <AssetsPanel />}
           </div>
         </div>
         <Splitter dir="x" onDrag={(d) => setLayout((l) => ({ ...l, side: clamp(l.side - d, 220, window.innerWidth * 0.5) }))} />
@@ -157,13 +159,14 @@ function BottomTabs() {
   const ed = useEditor()
   useAssets()
   const errors = ed.logs.filter((l) => l.kind === 'error').length
-  const tab = (id: 'output' | 'assets', label: string, icon: React.ReactNode, badge?: React.ReactNode) => (
+  const tab = (id: 'output' | 'assets' | 'animation', label: string, icon: React.ReactNode, badge?: React.ReactNode) => (
     <div className={`btab${ed.bottomTab === id ? ' active' : ''}`} onClick={() => { editor.bottomTab = id; editor.emit() }}>{icon} {label}{badge}</div>
   )
   return (
     <div className="btabs">
       {tab('output', 'Output', <Terminal size={13} />, errors ? <span className="badge err">{errors}</span> : null)}
       {tab('assets', 'Assets', <Package size={13} />)}
+      {tab('animation', 'Animation', <Clapperboard size={13} />)}
     </div>
   )
 }
