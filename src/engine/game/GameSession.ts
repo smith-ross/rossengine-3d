@@ -10,7 +10,7 @@ import { SceneRenderer } from '../render/SceneRenderer'
 import { GuiRenderer } from '../gui/GuiRenderer'
 import { CharacterController, buildDefaultCharacter, findHumanoidModel } from './Character'
 import { TweenManager } from './Tweens'
-import { keyCodeName } from './Input'
+import { DragLook, keyCodeName } from './Input'
 import { ScriptHost } from '../scripting/ScriptHost'
 import { TypeScriptRuntime } from '../scripting/TypeScriptRuntime'
 import { PythonRuntime } from '../scripting/PythonRuntime'
@@ -54,7 +54,7 @@ export class GameSession implements Runtime, Runtime2D {
   private camYaw = 0
   private camPitch = -0.35
   private camZoom = 14
-  private rmbDrag: { x: number; y: number; moved: boolean } | null = null
+  private rmbDrag: { moved: number } | null = null
   private lmbDown: { x: number; y: number } | null = null
   private hovered: Instance | null = null
   private cleanup: Array<() => void> = []
@@ -461,6 +461,9 @@ export class GameSession implements Runtime, Runtime2D {
       target.addEventListener(ev, fn as EventListener, opts)
       this.cleanup.push(() => target.removeEventListener(ev, fn as EventListener, opts))
     }
+    // right-drag turns the default camera; the cursor stays put while the button is held
+    const look = new DragLook(el)
+    this.cleanup.push(() => look.dispose())
     on(window, 'keydown', (e) => {
       if (this.stopped || e.repeat) return
       const t = e.target as HTMLElement
@@ -496,7 +499,11 @@ export class GameSession implements Runtime, Runtime2D {
       this.mouseButtons.add(e.button)
       const type = e.button === 0 ? 'MouseButton1' : e.button === 2 ? 'MouseButton2' : 'MouseButton3'
       uis().fire('InputBegan', makeInput(type, 'Begin', 'Unknown', pos), false)
-      if (e.button === 2) this.rmbDrag = { x: e.clientX, y: e.clientY, moved: false }
+      if (e.button === 2) {
+        this.rmbDrag = { moved: 0 }
+        // only the default 3D camera turns with right-drag; elsewhere the cursor stays free
+        if (!this.mode2d && this.camera()?.get<EnumItem>('CameraType')?.name === 'Custom') look.begin(e)
+      }
       if (e.button === 0) { this.lmbDown = { x: e.clientX, y: e.clientY }; this.mouseObj?.fire('Button1Down') }
       if (e.button === 2) this.mouseObj?.fire('Button2Down')
     })
@@ -510,7 +517,8 @@ export class GameSession implements Runtime, Runtime2D {
       if (e.button === 2) {
         const r = this.rmbDrag
         this.rmbDrag = null
-        if (r && !r.moved) this.click(true)
+        look.end()
+        if (r && r.moved <= 2) this.click(true)
         this.mouseObj?.fire('Button2Up')
       }
       if (e.button === 0) {
@@ -522,14 +530,14 @@ export class GameSession implements Runtime, Runtime2D {
     })
     on(window, 'mousemove', (e) => {
       const rect = el.getBoundingClientRect()
+      // while the cursor is locked its position doesn't change, so Mouse.X/Y stay where the drag began
       this.mouse = new Vector2(e.clientX - rect.left, e.clientY - rect.top)
-      if (this.rmbDrag) {
-        const dx = e.clientX - this.rmbDrag.x, dy = e.clientY - this.rmbDrag.y
-        if (Math.abs(dx) + Math.abs(dy) > 2) this.rmbDrag.moved = true
-        this.camYaw -= dx * 0.008
-        this.camPitch = Math.min(1.4, Math.max(-1.4, this.camPitch - dy * 0.008))
-        this.rmbDrag.x = e.clientX
-        this.rmbDrag.y = e.clientY
+      const d = this.rmbDrag && look.move(e)
+      if (this.rmbDrag && !look.dragging) this.rmbDrag.moved += Math.abs(e.movementX) + Math.abs(e.movementY)
+      if (this.rmbDrag && d) {
+        this.rmbDrag.moved += Math.abs(d.dx) + Math.abs(d.dy)
+        this.camYaw -= d.dx * 0.008
+        this.camPitch = Math.min(1.4, Math.max(-1.4, this.camPitch - d.dy * 0.008))
       }
       if (this.scripts.isListening(uis(), 'InputChanged')) {
         uis().fire('InputChanged', makeInput('MouseMovement', 'Change', 'Unknown', new Vector3(this.mouse.x, this.mouse.y, 0), new Vector3(e.movementX, e.movementY, 0)), false)

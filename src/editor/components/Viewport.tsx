@@ -13,6 +13,7 @@ import { assets } from '../../engine/assets'
 import { importFiles, insertAsset } from '../assetOps'
 import { ASSET_DRAG_TYPE } from './AssetsPanel'
 import { Viewport2D } from './Viewport2D'
+import { DragLook } from '../../engine/game/Input'
 
 // camera state survives renderer rebuilds (undo, open file...)
 const cam = { pos: new THREE.Vector3(30, 25, 40), yaw: 0.65, pitch: -0.45 }
@@ -40,7 +41,8 @@ export function Viewport() {
 
     const dom = r.renderer.domElement
     const keys = new Set<string>()
-    let rmb: { x: number; y: number } | null = null
+    // right-drag looks around; the cursor stays where the drag began
+    const look = new DragLook(dom)
     let mmb: { x: number; y: number } | null = null
     let lmbDown: { x: number; y: number } | null = null
 
@@ -222,7 +224,7 @@ export function Viewport() {
 
     const onMouseDown = (e: MouseEvent) => {
       dom.focus()
-      if (e.button === 2) rmb = { x: e.clientX, y: e.clientY }
+      if (e.button === 2) look.begin(e)
       if (e.button === 1) { mmb = { x: e.clientX, y: e.clientY }; e.preventDefault() }
       if (e.button === 0 && !tc.dragging && (tc.axis === null || !helper.visible)) {
         lmbDown = { x: e.clientX, y: e.clientY }
@@ -232,7 +234,7 @@ export function Viewport() {
     let hoverQueued = false
     const onMouseMove = (e: MouseEvent) => {
       if (drag) { updateDrag(e); return }
-      if (!rmb && !mmb && !tc.dragging && e.target === dom && !hoverQueued) {
+      if (!look.dragging && !mmb && !tc.dragging && e.target === dom && !hoverQueued) {
         hoverQueued = true
         requestAnimationFrame(() => {
           hoverQueued = false
@@ -241,10 +243,10 @@ export function Viewport() {
           r.setHover(selectable(hit?.inst ?? null, e.altKey))
         })
       }
-      if (rmb) {
-        cam.yaw -= (e.clientX - rmb.x) * 0.005
-        cam.pitch = Math.max(-1.55, Math.min(1.55, cam.pitch - (e.clientY - rmb.y) * 0.005))
-        rmb = { x: e.clientX, y: e.clientY }
+      const d = look.move(e)
+      if (d) {
+        cam.yaw -= d.dx * 0.005
+        cam.pitch = Math.max(-1.55, Math.min(1.55, cam.pitch - d.dy * 0.005))
       }
       if (mmb) {
         const right = new THREE.Vector3(1, 0, 0).applyQuaternion(r.camera.quaternion)
@@ -254,7 +256,7 @@ export function Viewport() {
       }
     }
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 2) rmb = null
+      if (e.button === 2) look.end()
       if (e.button === 1) mmb = null
       if (e.button === 0 && drag) {
         const wasActive = drag.active
@@ -312,6 +314,7 @@ export function Viewport() {
 
     return () => {
       unsub()
+      look.dispose()
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
       window.removeEventListener('keydown', onKeyDown)
