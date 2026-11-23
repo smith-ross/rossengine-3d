@@ -7,6 +7,9 @@ import { materialTexture } from './textures'
 import { cloneMesh, loadMesh, loadTexture } from './meshes'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { assets } from '../assets'
+import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFailed, setPassMaterial, shaderMaterial, updateShaderUniforms } from './shaders'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
 const UNIT_SPHERE = new THREE.SphereGeometry(0.5, 32, 16)
@@ -37,6 +40,8 @@ interface PartView {
   loaded?: THREE.Object3D
   loadedKey?: string
   ownMaterials?: boolean
+  /** active custom Shader material (replaces the part's material) */
+  shader?: ShaderMat | null
 }
 
 /** Local transform (in part space, before scaling) for a decal on each face. */
@@ -79,6 +84,11 @@ export class SceneRenderer {
   private running = false
   hidden = new Set<Instance>()
   private localTransparency = new Map<Instance, number>()
+  /** parts whose Shader child changed: re-applied before the next frame */
+  private shaderDirty = new Set<Instance>()
+  private screen: { composer: EffectComposer; passes: Array<{ shader: Instance; pass: ShaderPass; sm: ShaderMat }>; key: string } | null = null
+  private screenDirty = true
+  private disposeShaderFailed: () => void
 
   constructor(readonly container: HTMLElement, readonly game: DataModel) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false })
@@ -91,6 +101,11 @@ export class SceneRenderer {
     Object.assign(this.renderer.domElement.style, { display: 'block', width: '100%', height: '100%' })
     this.renderer.domElement.tabIndex = 0
     container.appendChild(this.renderer.domElement)
+    installShaderErrorHandler(this.renderer)
+    this.disposeShaderFailed = onShaderFailed((sh) => {
+      if (sh.className === 'ScreenShader') this.screenDirty = true
+      else if (sh.parent) this.shaderDirty.add(sh.parent)
+    })
 
     this.sun.castShadow = true
     this.sun.shadow.mapSize.set(2048, 2048)
@@ -171,13 +186,101 @@ export class SceneRenderer {
       this.hoverBox.box.copy(this.boundsOf(this.hovered))
       this.hoverBox.visible = !this.hoverBox.box.isEmpty()
     } else this.hoverBox.visible = false
-    this.renderer.render(this.scene, this.camera)
+    this.updateShaders()
+    const screen = this.screenPasses()
+    if (screen) screen.composer.render()
+    else this.renderer.render(this.scene, this.camera)
   }
+
+  // ------------------------------------------------------------------ custom shaders
+  private updateShaders() {
+    for (const p of this.shaderDirty) { const v = this.views.get(p); if (v) this.updateMaterial(p as BasePart, v) }
+    this.shaderDirty.clear()
+    const t = clock()
+    const res = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    const sunColor = new THREE.Vector3(this.sun.color.r, this.sun.color.g, this.sun.color.b).multiplyScalar(this.sun.intensity / Math.PI)
+    const ambient = new THREE.Vector3(
+      this.ambient.color.r * this.ambient.intensity + this.hemi.color.r * this.hemi.intensity,
+      this.ambient.color.g * this.ambient.intensity + this.hemi.color.g * this.hemi.intensity,
+      this.ambient.color.b * this.ambient.intensity + this.hemi.color.b * this.hemi.intensity,
+    ).multiplyScalar(1 / Math.PI).addScalar(0.08)
+    for (const v of this.views.values()) {
+      const sm = v.shader
+      if (!sm) continue
+      updateShaderUniforms(sm, t)
+      const u = sm.material.uniforms
+      u.RESOLUTION.value.copy(res)
+      u.SUN_DIRECTION.value.copy(this.sunDir)
+      u.SUN_COLOR.value.copy(sunColor)
+      u.AMBIENT.value.copy(ambient)
+      const map = u.TEXTURE.value as THREE.Texture | null
+      if (map) { map.updateMatrix(); u.UV_TRANSFORM.value.copy(map.matrix) }
+    }
+  }
+
+  /** Swap the part's material for its Shader child's (or back). Called at the end of updateMaterial. */
+  private applyShader(part: BasePart, v: PartView) {
+    const sh = part.children.find((c) => c.className === 'Shader' && c.get<boolean>('Enabled') !== false)
+    const sm = sh ? shaderMaterial(sh, '3d', v.shader) : null
+    if (!sm && v.shader) v.shader.material.dispose()
+    v.shader = sm
+    if (!sm) { v.mesh.material = v.material; return }
+    const m = v.material
+    const u = sm.material.uniforms
+    u.COLOR.value.set(m.color.r, m.color.g, m.color.b, m.opacity)
+    u.TEXTURE.value = m.map
+    u.HAS_TEXTURE.value = !!m.map
+    if (!m.map) u.UV_TRANSFORM.value.identity()
+    sm.material.transparent = m.transparent || !!sh!.get<boolean>('Transparent')
+    sm.material.depthWrite = !sm.material.transparent
+    sm.material.side = m.side
+    v.mesh.material = sm.material
+    v.loaded?.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = sm.material })
+  }
+
+  /** The post-processing chain for ScreenShaders in Lighting (null when there are none). */
+  private screenPasses() {
+    const lighting = this.game.children.find((c) => c.className === 'Lighting')
+    const shaders = lighting ? lighting.children.filter((c) => c.className === 'ScreenShader' && c.get<boolean>('Enabled') !== false) : []
+    if (this.screenDirty || (this.screen?.key ?? this.emptyScreenKey) !== shaders.map((sh) => sh.id).join(',')) {
+      this.screenDirty = false
+      this.rebuildScreen(shaders)
+    }
+    if (!this.screen) return null
+    const t = clock()
+    const res = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    for (const p of this.screen.passes) {
+      // a source/attribute edit rebuilds just this pass's material
+      const sm = shaderMaterial(p.shader, 'screen', p.sm)
+      if (!sm) { this.screenDirty = true; continue }
+      if (sm !== p.sm) { p.sm = sm; setPassMaterial(p.pass, sm.material) }
+      updateShaderUniforms(sm, t)
+      sm.material.uniforms.RESOLUTION.value.copy(res)
+    }
+    return this.screen
+  }
+
+  private rebuildScreen(shaders: Instance[]) {
+    const old = this.screen
+    this.screen = null
+    if (old) { for (const p of old.passes) p.pass.dispose(); old.composer.dispose() }
+    const passes: Array<{ shader: Instance; pass: ShaderPass; sm: ShaderMat }> = []
+    for (const sh of shaders) {
+      const sm = shaderMaterial(sh, 'screen')
+      if (sm) passes.push({ shader: sh, pass: new ShaderPass(sm.material, 'TEXTURE'), sm })
+    }
+    // a failed shader is left out, but keep the key so we don't rebuild every frame
+    const key = shaders.map((sh) => sh.id).join(',')
+    if (!passes.length) { this.screen = null; this.emptyScreenKey = key; return }
+    this.screen = { composer: makeComposer(this.renderer, this.scene, this.camera, passes.map((p) => p.pass), this.container), passes, key }
+  }
+  private emptyScreenKey = ''
 
   resize() {
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
     this.renderer.setSize(w, h, false)
+    this.screen?.composer.setSize(w, h)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
   }
@@ -186,8 +289,10 @@ export class SceneRenderer {
     this.stop()
     this.disposeObserver()
     this.disposeAssets()
+    this.disposeShaderFailed()
     this.resizeObserver.disconnect()
-    for (const v of this.views.values()) v.material.dispose()
+    for (const v of this.views.values()) { v.material.dispose(); v.shader?.material.dispose() }
+    if (this.screen) { for (const p of this.screen.passes) p.pass.dispose(); this.screen.composer.dispose() }
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
@@ -249,13 +354,22 @@ export class SceneRenderer {
       return
     }
     if (inst.className === 'Lighting') this.applyLighting()
+    this.shaderTouched(inst)
+  }
+
+  /** A Shader/ScreenShader was added, removed, moved or edited. */
+  private shaderTouched(inst: Instance) {
+    if (inst.className === 'Shader' && inst.parent) this.shaderDirty.add(inst.parent)
+    if (inst.className === 'ScreenShader') this.screenDirty = true
   }
 
   private remove(inst: Instance) {
+    this.shaderTouched(inst)
     const v = this.views.get(inst)
     if (v) {
       this.scene.remove(v.obj)
       v.material.dispose()
+      v.shader?.material.dispose()
       this.views.delete(inst)
     }
     const d = this.decals.get(inst)
@@ -292,6 +406,8 @@ export class SceneRenderer {
     if (this.decals.has(inst)) { this.updateDecal(inst); return }
     if (this.lights.has(inst)) { this.updateLight(inst); return }
     if (inst.className === 'Lighting') this.applyLighting()
+    // Shader edits; shaderMaterial reuses the compiled material unless the source or attribute types changed
+    this.shaderTouched(inst)
   }
 
   /** lights and decals follow their parent part */
@@ -413,6 +529,7 @@ export class SceneRenderer {
       })
     }
     this.updateTransform(part, v)
+    this.applyShader(part, v)
   }
 
   private updateDecal(inst: Instance) {
@@ -573,3 +690,4 @@ function makeSky() {
   mesh.renderOrder = -1
   return mesh
 }
+

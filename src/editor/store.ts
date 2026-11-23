@@ -10,6 +10,7 @@ import type { OutputKind } from '../engine/luau/LuauRuntime'
 import { assets, SerializedAsset } from '../engine/assets'
 import { idbGet, idbSet } from './persist'
 import { onMeshError } from '../engine/render/meshes'
+import { onShaderErrors } from '../engine/render/shaders'
 import { DEFAULT_SOURCE, languageOf } from '../engine/scripting/languages'
 
 export type Tool = 'select' | 'move' | 'scale' | 'rotate'
@@ -67,6 +68,9 @@ class EditorStore {
     this.attach(this.game)
     // problems loading imported models show up in Output
     onMeshError((name, message) => this.log('warn', `Model "${name}": ${message}`))
+    onShaderErrors((errs) => {
+      for (const e of errs) this.log('error', `${e.shader.getFullName()}:${e.line ?? 1}: ${e.message}`, 'Shader')
+    })
     assets.subscribe(() => { if (!this.playing && this.ready) { this.dirty = true; this.scheduleAutosave() } this.emit() })
   }
 

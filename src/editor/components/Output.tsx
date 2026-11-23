@@ -1,3 +1,4 @@
+import { isCode } from '../ops'
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CircleAlert, Info, Trash2 } from 'lucide-react'
 import { editor, useEditor } from '../store'
@@ -24,8 +25,8 @@ export function Output() {
       if (!inst) break
     }
     // scripts copied at runtime (e.g. into PlayerGui) map back by name
-    if (!inst) inst = editor.game.getDescendants().find((d) => d.isA('LuaSourceContainer') && d.name === path[path.length - 1])
-    if (inst?.isA?.('LuaSourceContainer')) editor.openScript(inst, Number(m[2]))
+    if (!inst) inst = editor.game.getDescendants().find((d) => isCode(d) && d.name === path[path.length - 1])
+    if (inst && isCode(inst)) editor.openScript(inst, Number(m[2]))
   }
 
   const errors = ed.logs.filter((l) => l.kind === 'error').length

@@ -5,6 +5,7 @@ import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
 import { view2d } from './components/Viewport2D'
 import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
+import { DEFAULT_SHADER_SOURCE_2D } from '../engine/shaderDefaults'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
 export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
@@ -19,6 +20,9 @@ export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguag
   })
 }
 
+/** Instances edited in the code editor: scripts and shaders. */
+export const isCode = (i: Instance) => i.isA('LuaSourceContainer') || i.className === 'Shader' || i.className === 'ScreenShader'
+
 let clipboard: SerializedInstance[] = []
 /** Where new parts go: set by the viewport to the point in front of the camera. */
 export const insertHint = { position: new Vector3(0, 5, 0) }
@@ -32,6 +36,13 @@ export function defaultParentFor(className: string): Instance {
   if (info && isA(info.name, 'Node2D')) {
     return sel && isA(sel.className, 'Node2D') && !(sel.className === 'TileMap') ? sel : g.getService('World2D')
   }
+  if (className === 'Shader') {
+    // inside the selected part / 2D drawable (or the parent of a selected Shader)
+    const drawable = (i?: Instance | null) => !!i && (i instanceof BasePart || ['Sprite2D', 'AnimatedSprite2D', 'TileMap', 'Text2D'].includes(i.className))
+    if (drawable(sel)) return sel!
+    if (sel?.className === 'Shader' && drawable(sel.parent)) return sel.parent!
+  }
+  if (className === 'ScreenShader') return g.getService('World2D').get('Enabled') ? g.getService('World2D') : g.getService('Lighting')
   if (sel && !(sel instanceof BasePart && info && (isA(info.name, 'BasePart')))) {
     // insert into the selected container
     return sel
@@ -80,8 +91,9 @@ export function insertObject(className: string, parent?: Instance): Instance {
       }
     }
     inst.setParent(parent ?? defaultParentFor(className))
+    if (className === 'Shader' && inst.parent && /2D$|^TileMap$/.test(inst.parent.className)) inst.set('Source', DEFAULT_SHADER_SOURCE_2D)
     editor.selection = [inst]
-    if (inst.isA('LuaSourceContainer')) editor.openScript(inst)
+    if (isCode(inst)) editor.openScript(inst)
     return inst
   })
 }

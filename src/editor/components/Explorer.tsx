@@ -1,3 +1,4 @@
+import { isCode } from '../ops'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Instance, allClasses } from '../../engine/instance'
 import { SERVICE_ORDER } from '../../engine/classes'
@@ -93,7 +94,7 @@ export function Explorer() {
         else if (cur?.parent && cur.parent !== game) editor.select([cur.parent])
         break
       case 'F2': e.preventDefault(); if (cur && !ed.playing && !cur.parentLocked) setRenaming(cur); break
-      case 'Enter': if (cur?.isA('LuaSourceContainer')) editor.openScript(cur); break
+      case 'Enter': if (cur && isCode(cur)) editor.openScript(cur); break
     }
   }
 
@@ -119,7 +120,7 @@ export function Explorer() {
               style={{ paddingLeft: 6 + depth * 14 }}
               onClick={(e) => onRowClick(e, inst)}
               onDoubleClick={() => {
-                if (inst.isA('LuaSourceContainer')) editor.openScript(inst)
+                if (isCode(inst)) editor.openScript(inst)
                 else if (!ed.playing) setRenaming(inst)
               }}
               onContextMenu={(e) => {
@@ -207,7 +208,7 @@ function ContextMenu({ menu, onClose, onRename }: { menu: MenuState; onClose: ()
   const style: React.CSSProperties = { left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 380) }
   return (
     <div className="context-menu" style={style} onClick={(e) => e.stopPropagation()} onMouseLeave={() => setSub(false)}>
-      {target.isA('LuaSourceContainer') && item('Open Script', () => editor.openScript(target))}
+      {isCode(target) && item(target.isA('LuaSourceContainer') ? 'Open Script' : 'Open Shader', () => editor.openScript(target))}
       <div className={`menu-item${playing ? ' disabled' : ''}`} onMouseEnter={() => setSub(true)}>
         <span>Insert Object</span><span className="menu-shortcut">▸</span>
         {sub && !playing && <InsertMenu parent={target} onDone={onClose} />}

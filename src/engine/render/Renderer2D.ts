@@ -1,6 +1,10 @@
 // Renders World2D (sprites, animated sprites, tilemaps, text) with an orthographic three.js camera.
 // World coordinates are pixels, y down. Used by the 2D game session and the editor's 2D viewport.
 import * as THREE from 'three'
+import type { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { ShaderPass as ShaderPassImpl } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import type { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { ShaderMat, clock, installShaderErrorHandler, makeComposer, onShaderFailed, setPassMaterial, shaderMaterial, updateShaderUniforms } from './shaders'
 import { Color3, EnumItem, Vector2 } from '../datatypes'
 import { Instance } from '../instance'
 import { DataModel } from '../classes'
@@ -55,6 +59,8 @@ interface View {
   world: Xform
   order: number
   debug?: THREE.LineLoop
+  /** active custom Shader material (replaces the drawable's material) */
+  shader?: ShaderMat | null
 }
 
 export interface Renderer2DOptions {
@@ -85,6 +91,10 @@ export class Renderer2D {
   private last = performance.now()
   private running = false
   private grid: THREE.LineSegments | null = null
+  private screen: { composer: EffectComposer; passes: Array<{ shader: Instance; pass: ShaderPass; sm: ShaderMat }>; key: string } | null = null
+  private screenDirty = true
+  private emptyScreenKey = ''
+  private disposeShaderFailed: () => void
   /** drawables in draw order, rebuilt each frame */
   drawList: View[] = []
   /** every Node2D seen in the last traversal with its world transform */
@@ -97,14 +107,23 @@ export class Renderer2D {
     Object.assign(this.renderer.domElement.style, { display: 'block', width: '100%', height: '100%', imageRendering: 'pixelated' })
     this.renderer.domElement.tabIndex = 0
     container.appendChild(this.renderer.domElement)
+    installShaderErrorHandler(this.renderer)
+    this.disposeShaderFailed = onShaderFailed((sh) => this.shaderTouched(sh))
     this.overlay.renderOrder = 1e9
     this.scene.add(this.overlay)
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
     this.resize()
     this.disposeObserver = game.observe({
-      removing: (inst) => { for (const i of [inst, ...inst.getDescendants()]) this.removeView(i) },
-      changed: (inst) => { const v = this.views.get(inst); if (v) v.dirty = true; else if (inst.parent && this.views.get(inst.parent) && inst.className === 'SpriteAnimation') this.views.get(inst.parent)!.dirty = true },
+      added: (inst) => this.shaderTouched(inst),
+      removing: (inst) => { this.shaderTouched(inst); for (const i of [inst, ...inst.getDescendants()]) this.removeView(i) },
+      reparented: (inst) => this.shaderTouched(inst),
+      changed: (inst) => {
+        const v = this.views.get(inst)
+        if (v) v.dirty = true
+        else if (inst.parent && this.views.get(inst.parent) && inst.className === 'SpriteAnimation') this.views.get(inst.parent)!.dirty = true
+        this.shaderTouched(inst)
+      },
     })
     this.disposeAssets = assets.subscribe(() => { for (const v of this.views.values()) v.dirty = true })
   }
@@ -132,8 +151,10 @@ export class Renderer2D {
     this.stop()
     this.disposeObserver()
     this.disposeAssets()
+    this.disposeShaderFailed()
+    if (this.screen) { for (const p of this.screen.passes) p.pass.dispose(); this.screen.composer.dispose() }
     this.resizeObserver.disconnect()
-    for (const v of this.views.values()) { v.mat?.dispose(); v.mesh?.geometry !== PLANE && v.mesh?.geometry !== CIRCLE && v.mesh?.geometry.dispose() }
+    for (const v of this.views.values()) { v.mat?.dispose(); v.shader?.material.dispose(); v.mesh?.geometry !== PLANE && v.mesh?.geometry !== CIRCLE && v.mesh?.geometry.dispose() }
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
@@ -141,6 +162,7 @@ export class Renderer2D {
   resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1
     this.renderer.setSize(w, h, false)
+    this.screen?.composer.setSize(w, h)
   }
 
   size() { return { w: this.container.clientWidth || 1, h: this.container.clientHeight || 1 } }
@@ -208,7 +230,80 @@ export class Renderer2D {
       if (v.mesh && this.frameOverride.has(v.inst)) this.applyFrame(v, this.frameOverride.get(v.inst)!)
     }
     this.updateOverlay()
-    this.renderer.render(this.scene, this.camera)
+    this.updateShaders()
+    const screen = this.screenPasses()
+    if (screen) screen.composer.render()
+    else this.renderer.render(this.scene, this.camera)
+  }
+
+  // ------------------------------------------------------------------ custom shaders
+  /** A Shader/ScreenShader was added, removed, moved or edited (or failed to compile). */
+  private shaderTouched(inst: Instance) {
+    if (inst.className === 'Shader' && inst.parent) { const v = this.views.get(inst.parent); if (v) v.dirty = true }
+    if (inst.className === 'ScreenShader') this.screenDirty = true
+  }
+
+  private updateShaders() {
+    const t = clock()
+    const res = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    for (const v of this.drawList) {
+      const sm = v.shader
+      if (!sm) continue
+      updateShaderUniforms(sm, t)
+      const u = sm.material.uniforms
+      u.RESOLUTION.value.copy(res)
+      const map = u.TEXTURE.value as THREE.Texture | null
+      if (map) { map.updateMatrix(); u.UV_TRANSFORM.value.copy(map.matrix) }
+    }
+  }
+
+  /** Swap the drawable's material for its Shader child's (or back). Called after each rebuild. */
+  private applyShader(v: View) {
+    const sh = v.inst.children.find((c) => c.className === 'Shader' && c.get<boolean>('Enabled') !== false)
+    const sm = sh ? shaderMaterial(sh, '2d', v.shader) : null
+    if (!sm && v.shader) v.shader.material.dispose()
+    v.shader = sm
+    if (!v.mesh || !v.mat) return
+    if (!sm) { v.mesh.material = v.mat; return }
+    const m = v.mat
+    const u = sm.material.uniforms
+    u.COLOR.value.set(m.color.r, m.color.g, m.color.b, m.opacity)
+    u.TEXTURE.value = m.map
+    u.HAS_TEXTURE.value = !!m.map
+    if (!m.map) u.UV_TRANSFORM.value.identity()
+    v.mesh.material = sm.material
+  }
+
+  /** ScreenShaders in World2D (or Lighting) as a post-processing chain; null when there are none. */
+  private screenPasses() {
+    const lighting = this.game.children.find((c) => c.className === 'Lighting')
+    const shaders = [...(lighting?.children ?? []), ...this.world2d.children]
+      .filter((c) => c.className === 'ScreenShader' && c.get<boolean>('Enabled') !== false)
+    const key = shaders.map((sh) => sh.id).join(',')
+    if (this.screenDirty || (this.screen?.key ?? this.emptyScreenKey) !== key) {
+      this.screenDirty = false
+      const old = this.screen
+      this.screen = null
+      if (old) { for (const p of old.passes) p.pass.dispose(); old.composer.dispose() }
+      const passes: Array<{ shader: Instance; pass: ShaderPass; sm: ShaderMat }> = []
+      for (const sh of shaders) {
+        const sm = shaderMaterial(sh, 'screen')
+        if (sm) passes.push({ shader: sh, pass: new ShaderPassImpl(sm.material, 'TEXTURE'), sm })
+      }
+      if (passes.length) this.screen = { composer: makeComposer(this.renderer, this.scene, this.camera, passes.map((p) => p.pass), this.container), passes, key }
+      else this.emptyScreenKey = key
+    }
+    if (!this.screen) return null
+    const t = clock()
+    const res = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    for (const p of this.screen.passes) {
+      const sm = shaderMaterial(p.shader, 'screen', p.sm)
+      if (!sm) { this.screenDirty = true; continue }
+      if (sm !== p.sm) { p.sm = sm; setPassMaterial(p.pass, sm.material) }
+      updateShaderUniforms(sm, t)
+      sm.material.uniforms.RESOLUTION.value.copy(res)
+    }
+    return this.screen
   }
 
   // ------------------------------------------------------------------ views
@@ -228,6 +323,7 @@ export class Renderer2D {
     if (v) {
       this.scene.remove(v.group)
       v.mat?.dispose()
+      v.shader?.material.dispose()
       if (v.mesh && v.mesh.geometry !== PLANE && v.mesh.geometry !== CIRCLE) v.mesh.geometry.dispose()
       if (v.tex && (v.tex as any).__clone) v.tex.dispose()
       this.views.delete(inst)
@@ -248,6 +344,7 @@ export class Renderer2D {
       case 'TileMap': this.buildTileMap(v as View & { inst: TileMap }, mat); break
       case 'Text2D': this.buildText(v, mat); break
     }
+    this.applyShader(v)
   }
 
   private setMesh(v: View, geo: THREE.BufferGeometry) {

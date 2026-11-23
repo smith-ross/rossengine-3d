@@ -153,6 +153,39 @@ ScreenGui HUDs, Sounds, ClickDetectors, TweenService and every scripting languag
 - **auto-tiling:** in the palette, click **+ Terrain** with the top-left tile of a block selected, then pick the terrain as the brush. Painting, erasing and rectangles then choose edge and corner tiles automatically. **Re-tile map** refreshes everything after you change a terrain's `Tiles`;
 - the Properties panel shows a sprite's sheet: click frames to set `Frame`, or to build a `SpriteAnimation`'s frame list, and **Fit size to frame**.
 
+## Shaders
+
+Custom GLSL, edited in the code editor with highlighting, completions and live error checking.
+
+- **Shader:** put it inside a 3D part (including MeshParts), or inside a Sprite2D, AnimatedSprite2D, TileMap or Text2D. It replaces that object's material.
+- **ScreenShader:** post-processing for the whole screen. Put it in **Lighting** (3D) or **World2D** (2D). Several screen shaders run in order.
+
+A shader is a function returning the colour of each pixel, plus an optional function that moves vertices:
+
+```glsl
+vec4 fragment() {
+	float stripes = step(0.5, fract(WORLD_POSITION.y * 2.0 + TIME));
+	return vec4(shade(mix(BASE.rgb, Tint, stripes)), BASE.a);
+}
+
+vec3 vertex() {   // optional: local position, before Size scaling
+	return POSITION + NORMAL * sin(POSITION.y * 12.0 + TIME * 4.0) * Wobble;
+}
+```
+
+- **Built-ins:**
+  - `BASE`: what the object would normally draw;
+  - `COLOR`, `TEXTURE` (with `sampleTexture(uv)`), `UV`;
+  - `WORLD_POSITION`, `WORLD_NORMAL`, `LOCAL_POSITION`, `CAMERA_POSITION`;
+  - `TIME`, `RESOLUTION`;
+  - `shade(albedo)`: simple sun and ambient lighting in 3D;
+  - in `vertex()`: `POSITION` and `NORMAL`.
+  
+  Screen shaders get `BASE` (the rendered image at `UV`) and `TEXTURE` (the whole frame).
+- **Uniforms from attributes:** every attribute on the Shader becomes a uniform of the matching type: number → `float`, bool → `bool`, Vector2 → `vec2`, Vector3 or Color3 → `vec3`, and an image asset → `sampler2D`. Scripts can animate them with `shader:SetAttribute("Wobble", 0.2)`.
+- **Errors:** compile errors appear as squiggles while you type, and in **Output** as `Workspace.Part.Shader:6: …` (click to jump to the line). A shader that doesn't compile falls back to the object's normal material.
+- **Limitations:** custom shaders don't receive shadows, and skinned meshes draw in their rest pose.
+
 ## Assets
 
 Sounds, images and 3D models are imported from files and saved inside the place file, so a game never needs an external ID or URL.

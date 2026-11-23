@@ -13,18 +13,30 @@ import {
   MONACO_LANGUAGE, checkPython, loadPythonChecker, setupLanguages, syncTypeScriptWorkspace, uriFor,
 } from '../languages/setup'
 import { editor as store, useEditor } from '../store'
+import { registerGlsl } from '../shaders/glsl'
+import { attributeUniforms, checkShader, isShaderInstance, shaderKindFor } from '../../engine/render/shaders'
 
 ;(self as any).MonacoEnvironment = {
   getWorker: (_id: string, label: string) => (label === 'typescript' || label === 'javascript' ? new TsWorker() : new EditorWorker()),
 }
 registerLuau()
 setupLanguages()
+registerGlsl((model) => { const s = byUri.get(model.uri.toString()); return s && isShaderInstance(s) ? shaderKindFor(s) : null })
 
 const models = new Map<Instance, monaco.editor.ITextModel>()
 const byUri = new Map<string, Instance>()
 
 /** One model per script; recreated if the script's language or (for TypeScript) its path changed. */
 function modelFor(script: Instance) {
+  if (isShaderInstance(script)) {
+    let m = models.get(script)
+    if (m && !m.isDisposed()) return m
+    const uri = monaco.Uri.parse(`inmemory://shaders/${script.id}.glsl`)
+    m = monaco.editor.getModel(uri) ?? monaco.editor.createModel(script.get<string>('Source') ?? '', 'glsl', uri)
+    models.set(script, m)
+    byUri.set(uri.toString(), script)
+    return m
+  }
   const lang = languageOf(script)
   const uriText = uriFor(script, lang)
   let m = models.get(script)
@@ -139,6 +151,7 @@ export function ScriptEditor({ script }: { script: Instance }) {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const readOnly = script.dataModel !== store.game
   const lang: ScriptLanguage = languageOf(script)
+  const isShader = isShaderInstance(script)
 
   useEffect(() => {
     registerProviders()
@@ -179,10 +192,20 @@ export function ScriptEditor({ script }: { script: Instance }) {
     if (lang === 'Python') void loadPythonChecker().then(() => runCheck())
     const model = modelFor(script)
     if (e.getModel() !== model) e.setModel(model)
-    e.updateOptions({ readOnly, insertSpaces: lang === 'Python', tabSize: 4 })
+    e.updateOptions({ readOnly, insertSpaces: !isShader && lang === 'Python', tabSize: 4 })
     let timer: number | null = null
     const runCheck = () => {
       if (model.isDisposed()) return
+      if (isShader) {
+        // compile in a hidden WebGL context: errors show while typing
+        const errs = checkShader(model.getValue(), shaderKindFor(script), attributeUniforms(script))
+        if (!errs) return
+        monaco.editor.setModelMarkers(model, 'glsl', errs.map((er) => {
+          const line = Math.min(Math.max(er.line ?? 1, 1), model.getLineCount())
+          return { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: model.getLineMaxColumn(line), message: er.message, severity: monaco.MarkerSeverity.Error, source: 'GLSL' }
+        }))
+        return
+      }
       if (lang === 'Python') {
         const markers = checkPython(model.getValue())
         if (markers) monaco.editor.setModelMarkers(model, 'python', markers)
@@ -210,7 +233,7 @@ export function ScriptEditor({ script }: { script: Instance }) {
     })
     e.focus()
     return () => { sub.dispose(); if (timer) clearTimeout(timer) }
-  }, [script, readOnly, lang])
+  }, [script, readOnly, lang, isShader])
 
   // jump to a line (from Output)
   useEffect(() => {

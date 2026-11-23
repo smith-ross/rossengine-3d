@@ -1,6 +1,7 @@
 // The built-in class library: Roblox-style Instances available to Luau scripts.
 import { CFrame, Color3, UDim, UDim2, Vector2, Vector3, enumItem, EnumItem } from './datatypes'
 import { register2DClasses } from './classes2d'
+import { DEFAULT_SCREEN_SHADER_SOURCE, DEFAULT_SHADER_SOURCE } from './shaderDefaults'
 import {
   DataModelLike, DataModelObserver, Instance, createInstance, defineClass, getClass, isA, setEnumResolver,
 } from './instance'
@@ -374,6 +375,29 @@ defineClass(Decal, {
     Face: { type: 'Enum.NormalId', default: () => enumItem('NormalId', 'Front'), category: 'Appearance' },
     Color3: { type: 'Color3', default: () => new Color3(1, 1, 1), category: 'Appearance' },
     Transparency: { type: 'number', category: 'Appearance' },
+  },
+})
+
+/**
+ * Custom GLSL for the object it's inside (a 3D part, or a 2D sprite / tile map / text). Source holds
+ * `vec4 fragment()` and optionally `vec3 vertex()`; the shader's attributes become uniforms.
+ */
+export class Shader extends Instance {}
+defineClass(Shader, {
+  name: 'Shader', superclass: 'Instance', category: 'Rendering',
+  props: {
+    Source: { type: 'string', hidden: true, default: () => DEFAULT_SHADER_SOURCE },
+    Enabled: { type: 'bool', default: () => true, category: 'Shader' },
+    Transparent: { type: 'bool', category: 'Shader' },
+  },
+})
+/** Post-processing over the whole screen. Goes in Lighting (3D) or World2D (2D); several run in order. */
+export class ScreenShader extends Instance {}
+defineClass(ScreenShader, {
+  name: 'ScreenShader', superclass: 'Instance', category: 'Rendering',
+  props: {
+    Source: { type: 'string', hidden: true, default: () => DEFAULT_SCREEN_SHADER_SOURCE },
+    Enabled: { type: 'bool', default: () => true, category: 'Shader' },
   },
 })
 

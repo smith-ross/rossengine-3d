@@ -99,7 +99,7 @@ export function App() {
             {ed.tabs.map((t) => (
               <div key={t.id} className={`tab${ed.activeTab === t ? ' active' : ''}`} onClick={() => { editor.activeTab = t; editor.emit() }}
                 onMouseDown={(e) => { if (e.button === 1) { e.preventDefault(); editor.closeTab(t) } }}>
-                <ClassIcon cls={t.className} size={13} lang={languageOf(t)} /> {t.name}<span className="tab-ext">.{EXTENSION[languageOf(t)]}</span>
+                <ClassIcon cls={t.className} size={13} lang={languageOf(t)} /> {t.name}<span className="tab-ext">.{t.className === 'Shader' || t.className === 'ScreenShader' ? 'glsl' : EXTENSION[languageOf(t)]}</span>
                 <span className="tab-close" onClick={(e) => { e.stopPropagation(); editor.closeTab(t) }}><X size={12} /></span>
               </div>
             ))}
