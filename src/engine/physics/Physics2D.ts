@@ -163,9 +163,14 @@ export class Physics2D {
     } else {
       const size = i.get<Vector2>('CollisionSize'), off = i.get<Vector2>('CollisionOffset')
       const w = Math.max(1, size.x * s.x), h = Math.max(1, size.y * s.y)
+      // Characters get slightly rounded corners so they slide past box corners and the seams
+      // between tile colliders instead of hooking on them; the outer size stays CollisionSize.
+      const round = kind === 'character' ? Math.min(1.5, w / 4, h / 4) : 0
       const cd = i.get<EnumItem>('CollisionShape')?.name === 'Circle'
         ? RAPIER.ColliderDesc.ball(Math.min(w, h) / 2 / this.ppm)
-        : RAPIER.ColliderDesc.cuboid(w / 2 / this.ppm, h / 2 / this.ppm)
+        : round > 0
+          ? RAPIER.ColliderDesc.roundCuboid((w / 2 - round) / this.ppm, (h / 2 - round) / this.ppm, round / this.ppm)
+          : RAPIER.ColliderDesc.cuboid(w / 2 / this.ppm, h / 2 / this.ppm)
       cd.setTranslation(off.x * s.x / this.ppm, off.y * s.y / this.ppm)
         .setFriction(i.get<number>('Friction') ?? 0.2)
         .setRestitution(i.get<number>('Restitution') ?? 0)
@@ -271,25 +276,41 @@ export class Physics2D {
       v = new Vector2(v.x + g.x * dt, v.y + g.y * dt)
     }
     const m = worldXform(inst)
-    b.rb.setTranslation(this.toM({ x: m.tx, y: m.ty }), true)
-    const desired = { x: (v.x * dt) / this.ppm, y: (v.y * dt) / this.ppm }
     const collider = b.colliders[0]
-    b.controller.computeColliderMovement(collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, (c) => this.byCollider.get(c.handle) !== b)
-    const mv = b.controller.computedMovement()
-    const st = { floor: b.controller.computedGrounded(), wall: false, ceiling: false, floorNormal: new Vector2(0, -1) }
-    for (let k = 0; k < b.controller.numComputedCollisions(); k++) {
-      const c = b.controller.computedCollision(k)
-      if (!c) continue
-      const n = c.normal1 // outward normal of the obstacle; "up" is -y
-      if (n.y < -0.65) { st.floor = true; st.floorNormal = new Vector2(n.x, n.y) }
-      else if (n.y > 0.65) st.ceiling = true
-      else if (Math.abs(n.x) > 0.65) st.wall = true
+    const filter = (c: RAPIER.Collider) => this.byCollider.get(c.handle) !== b
+    const st = { floor: false, wall: false, ceiling: false, floorNormal: new Vector2(0, -1) }
+    const pos = { x: m.tx / this.ppm, y: m.ty / this.ppm }
+    // Horizontal and vertical motion are resolved in two passes. A single diagonal sweep lets
+    // Rapier's controller catch on box corners (jumping into a platform's side would hang there
+    // while gravity built up, then drop). Horizontal first: it climbs slopes and steps; vertical
+    // second: it lands, hits ceilings and snaps to the ground.
+    const pass = (dx: number, dy: number) => {
+      // Move the collider to the body's current spot before querying: Rapier only syncs collider
+      // positions during world.step, which doesn't run every frame above 60 Hz.
+      b.rb.setTranslation(pos, true)
+      this.world.propagateModifiedBodyPositionsToColliders()
+      b.controller!.computeColliderMovement(collider, { x: dx, y: dy }, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, filter)
+      const mv = b.controller!.computedMovement()
+      if (b.controller!.computedGrounded()) st.floor = true
+      for (let k = 0; k < b.controller!.numComputedCollisions(); k++) {
+        const c = b.controller!.computedCollision(k)
+        if (!c) continue
+        const n = c.normal1 // outward normal of the obstacle; "up" is -y
+        if (n.y < -0.65) { st.floor = true; st.floorNormal = new Vector2(n.x, n.y) }
+        else if (n.y > 0.65) st.ceiling = true
+        else if (Math.abs(n.x) > 0.65) st.wall = true
+      }
+      pos.x += mv.x; pos.y += mv.y
+      return mv
     }
+    const desired = { x: (v.x * dt) / this.ppm, y: (v.y * dt) / this.ppm }
+    const mvx = desired.x ? pass(desired.x, 0) : { x: 0, y: 0 }
+    pass(0, desired.y)
     if (st.floor && v.y > 0) v = new Vector2(v.x, 0)
     if (st.ceiling && v.y < 0) v = new Vector2(v.x, 0)
-    if (st.wall && Math.abs(mv.x) < Math.abs(desired.x) * 0.5) v = new Vector2(0, v.y)
+    if (st.wall && Math.abs(mvx.x) < Math.abs(desired.x) * 0.5) v = new Vector2(0, v.y)
     b.state = st
-    const np = { x: m.tx + mv.x * this.ppm, y: m.ty + mv.y * this.ppm }
+    const np = { x: pos.x * this.ppm, y: pos.y * this.ppm }
     b.rb.setTranslation(this.toM(np), true)
     b.rb.setNextKinematicTranslation(this.toM(np))
     setWorldPosition(inst, new Vector2(np.x, np.y))

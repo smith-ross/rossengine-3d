@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
+import fs from 'node:fs'
 import '../src/engine/classes'
 import { DataModel } from '../src/engine/classes'
 import { Instance, addEventSink, createInstance } from '../src/engine/instance'
@@ -55,6 +56,84 @@ describe('2D physics', () => {
     expect(crate.get<Vector2>('Position').y).toBeGreaterThan(78)
     expect(crate.get<Vector2>('Position').y).toBeLessThan(81)
     expect(entered).toContain('RigidBody2D')
+    phys.dispose()
+  })
+})
+
+describe('2D character controller', () => {
+  /** Runs a CharacterBody2D with platformer-style input; reports mid-air stalls and tile overlaps. */
+  function simulate(opts: { hz: number; seconds: number; level: string[]; spawn: Vector2; input: (f: number, onFloor: boolean, rnd: () => number) => { dir: number; jump: boolean }; seed?: number }) {
+    const { game, w2d } = world()
+    w2d.set('Gravity', new Vector2(0, 900))
+    const map = make('TileMap', { TileSize: new Vector2(16, 16) }, w2d) as TileMap
+    const solid = new Set<string>()
+    opts.level.forEach((row, y) => [...row].forEach((ch, x) => { if ('GD#=S'.includes(ch)) { map.setCell(x, y, 0); solid.add(`${x},${y}`) } }))
+    const player = make('CharacterBody2D', { Position: opts.spawn, CollisionSize: new Vector2(9, 14), CollisionOffset: new Vector2(0, 1) }, w2d)
+    const phys = new Physics2D(game)
+    let r = opts.seed ?? 1
+    const rnd = () => (r = (r * 1103515245 + 12345) % 2147483648) / 2147483648
+    const problems: string[] = []
+    let stall = 0, maxFall = 0
+    for (let f = 0; f < opts.hz * opts.seconds && problems.length < 3; f++) {
+      phys.step(1 / opts.hz)
+      const { dir, jump } = opts.input(f, phys.bodyState(player).floor, rnd)
+      player.set('Velocity', new Vector2(dir * 110, jump ? -300 : player.get<Vector2>('Velocity').y))
+      const before = worldPosition(player)
+      phys.moveAndSlide(player)
+      const p = worldPosition(player), vy = player.get<Vector2>('Velocity').y
+      if (p.y < opts.level.length * 16) maxFall = Math.max(maxFall, vy)
+      if (!phys.bodyState(player).floor && Math.abs(p.y - before.y) < 0.02 && vy > 60) { if (++stall >= 4) problems.push(`stalled in mid-air at (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`) } else stall = 0
+      const l = p.x - 4.5, rt = p.x + 4.5, t = p.y - 6, b = p.y + 8
+      for (let cx = Math.floor(l / 16); cx <= Math.floor(rt / 16); cx++) for (let cy = Math.floor(t / 16); cy <= Math.floor(b / 16); cy++) {
+        if (!solid.has(`${cx},${cy}`)) continue
+        const ox = Math.min(rt, cx * 16 + 16) - Math.max(l, cx * 16), oy = Math.min(b, cy * 16 + 16) - Math.max(t, cy * 16)
+        if (ox > 0.5 && oy > 0.5) problems.push(`inside a tile at (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`)
+      }
+      if (p.y > opts.level.length * 16 + 100) { player.set('Position', opts.spawn); player.set('Velocity', new Vector2()) }
+    }
+    phys.dispose()
+    return { problems, maxFall }
+  }
+
+  it("slides down a platform's side instead of hanging on its corner", () => {
+    // jump up-right into the left side of a floating platform
+    const level = ['', '', '   ####', '', '', 'GGGGGGGGGGGG']
+    for (const hz of [60, 144]) {
+      const { problems, maxFall } = simulate({ hz, seconds: 2, level, spawn: new Vector2(26, 70), input: (f, onFloor) => ({ dir: 1, jump: f > 5 && f < 8 && onFloor }) })
+      expect(problems, `${hz} Hz`).toEqual([])
+      expect(maxFall, `${hz} Hz`).toBeLessThan(400) // no speed built up while stuck
+    }
+  })
+
+  it('never stalls or sinks into tiles while running and jumping around the platformer level', () => {
+    const src = fs.readFileSync('src/engine/templates2d.ts', 'utf8')
+    const level = [...src.match(/const LEVEL = \[([\s\S]*?)\r?\n\]/)![1].matchAll(/'([^']*)'/g)].map((m) => m[1])
+    for (const hz of [60, 144]) for (const seed of [1, 2, 3, 4, 5, 6]) {
+      let dir = 1, hold = 0
+      const { problems } = simulate({
+        hz, seconds: 40, level, seed, spawn: new Vector2(40, 108),
+        input: (_f, onFloor, rnd) => {
+          if (--hold <= 0) { dir = rnd() < 0.15 ? 0 : rnd() < 0.6 ? 1 : -1; hold = Math.floor(rnd() * hz) }
+          return { dir, jump: onFloor && rnd() < 0.08 }
+        },
+      })
+      expect(problems, `${hz} Hz, seed ${seed}`).toEqual([])
+    }
+  })
+
+  it('walks up and down a ramp', () => {
+    const { game, w2d } = world()
+    w2d.set('Gravity', new Vector2(0, 900))
+    make('StaticBody2D', { Position: new Vector2(0, 100), CollisionSize: new Vector2(2000, 20) }, w2d)
+    make('StaticBody2D', { Position: new Vector2(200, 50), Rotation: -30, CollisionSize: new Vector2(240, 20) }, w2d)
+    const player = make('CharacterBody2D', { Position: new Vector2(0, 70), CollisionSize: new Vector2(9, 14) }, w2d)
+    const phys = new Physics2D(game)
+    const run = (dir: number, frames: number) => { for (let f = 0; f < frames; f++) { phys.step(1 / 60); player.set('Velocity', new Vector2(dir * 110, player.get<Vector2>('Velocity').y)); phys.moveAndSlide(player) } }
+    run(0, 30); run(1, 120)
+    expect(worldPosition(player).y).toBeLessThan(40)
+    expect(phys.bodyState(player).floor).toBe(true)
+    run(-1, 45)
+    expect(phys.bodyState(player).floor).toBe(true)
     phys.dispose()
   })
 })
