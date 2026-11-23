@@ -1,3 +1,4 @@
+import { importRigFor } from '../assetOps'
 import { animEditor } from '../animation/animEditor'
 import { isCode } from '../ops'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -211,6 +212,7 @@ function ContextMenu({ menu, onClose, onRename }: { menu: MenuState; onClose: ()
   return (
     <div className="context-menu" style={style} onClick={(e) => e.stopPropagation()} onMouseLeave={() => setSub(false)}>
       {isCode(target) && item(target.isA('LuaSourceContainer') ? 'Open Script' : 'Open Shader', () => editor.openScript(target))}
+      {target.className === 'MeshPart' && !playing && !target.findFirstChild('Skeleton') && !!target.get<string>('MeshId') && item('Import rig from model', () => { void importRigFor(target) })}
       <div className={`menu-item${playing ? ' disabled' : ''}`} onMouseEnter={() => setSub(true)}>
         <span>Insert Object</span><span className="menu-shortcut">▸</span>
         {sub && !playing && <InsertMenu parent={target} onDone={onClose} />}

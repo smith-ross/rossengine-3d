@@ -24,6 +24,31 @@ export interface LoadedMesh {
   hasTextures: boolean
   skinned: boolean
   triangles: number
+  /** the skeleton of a rigged model (root bones; each with its rest pose relative to its parent) */
+  rig: RigBone[] | null
+  /** animation clips stored in the file (glTF / FBX) */
+  clips: THREE.AnimationClip[]
+}
+
+export interface RigBone {
+  name: string
+  position: [number, number, number]
+  quaternion: [number, number, number, number]
+  children: RigBone[]
+}
+
+/** The bone tree under a loaded model (null if it has no skinned mesh). */
+function readRig(root: THREE.Object3D): RigBone[] | null {
+  const bones: THREE.Bone[] = []
+  root.traverse((o) => { if ((o as THREE.Bone).isBone) bones.push(o as THREE.Bone) })
+  if (!bones.length) return null
+  const toRig = (b: THREE.Bone): RigBone => ({
+    name: b.name || 'Bone',
+    position: [b.position.x, b.position.y, b.position.z],
+    quaternion: [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w],
+    children: b.children.filter((c) => (c as THREE.Bone).isBone).map((c) => toRig(c as THREE.Bone)),
+  })
+  return bones.filter((b) => !(b.parent as THREE.Bone | null)?.isBone).map(toRig)
 }
 
 // ---- error reporting (the editor shows these in Output) ---------------------------------------
@@ -105,6 +130,7 @@ async function doLoad(content: string, asset: Asset | null): Promise<LoadedMesh 
   })
 
   let root: THREE.Object3D
+  let clips: THREE.AnimationClip[] = []
   if (ext === 'glb' || ext === 'gltf' || asset?.mime.includes('gltf')) {
     const loader = new GLTFLoader(manager)
     loader.setDRACOLoader(dracoLoader())
@@ -112,6 +138,7 @@ async function doLoad(content: string, asset: Asset | null): Promise<LoadedMesh 
     const gltf = await loader.loadAsync(url)
     root = gltf.scene ?? gltf.scenes?.[0]
     if (!root) throw new Error('the file contains no scene')
+    clips = gltf.animations ?? []
   } else if (ext === 'obj') {
     const loader = new OBJLoader(manager)
     const mtlEntry = asset?.files && [...asset.files].find(([k]) => extOf(k) === 'mtl')
@@ -126,6 +153,7 @@ async function doLoad(content: string, asset: Asset | null): Promise<LoadedMesh 
     root = new THREE.Mesh(geo, new THREE.MeshStandardMaterial())
   } else if (ext === 'fbx') {
     root = await new FBXLoader(manager).loadAsync(url)
+    clips = root.animations ?? []
   } else {
     throw new Error(`unsupported model format ".${ext}"`)
   }
@@ -176,7 +204,8 @@ async function doLoad(content: string, asset: Asset | null): Promise<LoadedMesh 
       pts.push(v.x, v.y, v.z)
     }
   })
-  const result: LoadedMesh = { object: outer, naturalSize: size, hullPoints: new Float32Array(pts), hasTextures, skinned, triangles }
+  const rig = skinned ? readRig(root) : null
+  const result: LoadedMesh = { object: outer, naturalSize: size, hullPoints: new Float32Array(pts), hasTextures, skinned, triangles, rig, clips: rig ? clips : [] }
   ready.set(asset ? asset.id : content, result)
   return result
 }

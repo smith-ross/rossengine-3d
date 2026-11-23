@@ -55,7 +55,23 @@ export function Viewport() {
     r.scene.add(helper)
     tc.setSize(0.9)
     /** side: which end of each axis was grabbed (+1/-1, 0 = scale from the middle) */
-    let dragStart: { pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3>; side: THREE.Vector3 } | null = null
+    let dragStart: {
+      pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3>; side: THREE.Vector3
+      /** posing a Bone: its world matrix and its parent's when the drag began */
+      bone?: { inst: Instance; startWorld: THREE.Matrix4; parentWorld: THREE.Matrix4 }
+    } | null = null
+    /** a single selected Bone whose model is loaded: the gizmo poses it */
+    const selectedBone = () => {
+      const s = editor.selection
+      if (s.length !== 1 || s[0].className !== 'Bone' || editor.playing) return null
+      const obj = r.boneObject(s[0])
+      return obj ? { inst: s[0], obj } : null
+    }
+    const worldCFrame = (m: THREE.Matrix4) => {
+      const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3()
+      m.decompose(pos, q, sc)
+      return CFrame.fromPositionQuaternion(pos, q)
+    }
     // hold Ctrl while scaling to grow both sides evenly (from the middle)
     let ctrlHeld = false
     const trackCtrl = (e: KeyboardEvent | PointerEvent) => { ctrlHeld = e.ctrlKey }
@@ -66,7 +82,8 @@ export function Viewport() {
 
     const syncGizmo = () => {
       const sel = editor.selection.filter((s) => s instanceof BasePart || s instanceof Model)
-      const pivot = editor.playing ? null : selectionPivot(sel)
+      const bone = selectedBone()
+      const pivot = editor.playing ? null : bone ? worldCFrame(bone.obj.matrixWorld) : selectionPivot(sel)
       const tool = editor.tool
       const visible = !!pivot && tool !== 'select' && !(tool === 'scale' && !(sel.length === 1 && sel[0] instanceof BasePart))
       helper.visible = visible
@@ -77,13 +94,23 @@ export function Viewport() {
       pivotObj.scale.set(1, 1, 1)
       tc.setMode(tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : 'translate')
       tc.setSpace(tool === 'move' && sel.length === 1 ? 'local' : 'local')
-      tc.setTranslationSnap(editor.snap || null)
+      tc.setTranslationSnap(bone ? null : editor.snap || null) // bones move in small steps
       tc.setRotationSnap(editor.rotateSnap ? THREE.MathUtils.degToRad(editor.rotateSnap) : null)
       tc.setScaleSnap(null)
     }
 
     tc.addEventListener('dragging-changed', (e: any) => {
       if (e.value) {
+        const bone = selectedBone()
+        if (bone) {
+          editor.checkpoint()
+          bone.obj.parent!.updateWorldMatrix(true, false)
+          dragStart = {
+            pivot: worldCFrame(bone.obj.matrixWorld), parts: new Map(), sizes: new Map(), side: new THREE.Vector3(),
+            bone: { inst: bone.inst, startWorld: bone.obj.matrixWorld.clone(), parentWorld: bone.obj.parent!.matrixWorld.clone() },
+          }
+          return
+        }
         const sel = editor.selection.filter((s) => s instanceof BasePart || s instanceof Model)
         const parts = new Map<BasePart, CFrame>()
         const sizes = new Map<BasePart, Vector3>()
@@ -110,6 +137,18 @@ export function Viewport() {
       if (!dragStart) return
       const m = new THREE.Matrix4().compose(pivotObj.position, pivotObj.quaternion, new THREE.Vector3(1, 1, 1))
       const now = CFrame.fromMatrix4(m)
+      if (dragStart.bone) {
+        // new world pose = gizmo delta * start pose; back into the bone's space as an offset from rest
+        const b = dragStart.bone
+        const delta = new THREE.Matrix4()
+        now.mul(dragStart.pivot.inverse()).toMatrix4(delta)
+        const local = b.parentWorld.clone().invert().multiply(delta.multiply(b.startWorld))
+        const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3()
+        local.decompose(pos, q, sc)
+        const rest = b.inst.get<CFrame>('CFrame')
+        b.inst.set('Transform', rest.inverse().mul(CFrame.fromPositionQuaternion(pos, q)))
+        return
+      }
       if (tc.mode === 'scale') {
         const [p] = [...dragStart.parts.keys()]
         const start = dragStart.sizes.get(p)!

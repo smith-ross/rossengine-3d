@@ -246,6 +246,15 @@ Other behaviour:
 - **The starting pose is what gets saved:** the preview only shows while the Animation tab is open, so saving, Play and duplicating always use the objects' real values.
 - **Editing the starting pose:** turn **Recording changes** off.
 
+### Rigged models
+
+Importing a rigged (skinned) model also imports its rig:
+- **Skeleton:** a `Skeleton` inside the MeshPart, with a `Bone` for every bone of the model. Each Bone has its rest pose (`CFrame`, also shown as `Position`/`Orientation`) and a `Transform` on top of it (also shown as `PoseOffset`/`PoseRotation`). The pose is drawn on the mesh live, in the editor and in games.
+- **Clips:** any animation clips in the file (glTF/FBX) become Animations in an AnimationPlayer on the MeshPart. Each has one `Transform` track per bone, with redundant keys removed.
+- **Posing:** select a Bone in the Explorer to see the skeleton, then use the **Move** and **Rotate** tools on it. With the Animation tab open, every pose you make is recorded as a keyframe, like any other property.
+- **Older imports:** a MeshPart imported before this (or with a changed MeshId) can get its rig by right-clicking it and choosing **Import rig from model**.
+- **From scripts:** `bone.Transform = CFrame.Angles(0, 0, math.rad(30))`.
+
 ### At runtime
 
 ```lua

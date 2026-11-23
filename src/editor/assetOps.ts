@@ -4,7 +4,9 @@ import { Instance, createInstance } from '../engine/instance'
 import { BasePart } from '../engine/classes'
 import { unzipSync } from 'fflate'
 import { ACCEPT, Asset, AssetKind, COMPANION_EXT, assets, contentRef, extOf, isMultiFileModel, kindOfFile } from '../engine/assets'
-import { loadMesh } from '../engine/render/meshes'
+import { LoadedMesh, loadMesh } from '../engine/render/meshes'
+import { buildSkeleton, clipToTracks } from '../engine/rig'
+import { writeTracks } from '../engine/animation'
 import { editor } from './store'
 import { insertHint } from './ops'
 
@@ -110,6 +112,7 @@ export async function insertAsset(asset: Asset, at: DropTarget = {}): Promise<In
       p.set('Anchored', true)
       p.set('CFrame', CFrame.fromPosition(new Vector3(point.x, point.y + size.y / 2, point.z)))
       p.setParent(editor.game.workspace)
+      if (mesh?.rig) importRig(p, mesh)
       editor.selection = [p]
       return p
     })
@@ -165,4 +168,37 @@ export function formatBytes(n: number) {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+/**
+ * A rigged model brings its skeleton (a Skeleton of Bones, animatable like any property) and its
+ * animation clips (one Animation each, in an AnimationPlayer on the MeshPart).
+ */
+function importRig(part: Instance, mesh: LoadedMesh) {
+  buildSkeleton(mesh.rig!).setParent(part)
+  if (!mesh.clips.length) return
+  const player = createInstance('AnimationPlayer')
+  player.setParent(part)
+  const used = new Set<string>()
+  for (const clip of mesh.clips) {
+    let name = clip.name || 'Animation'
+    for (let n = 2; used.has(name); n++) name = `${clip.name || 'Animation'}${n}`
+    used.add(name)
+    const anim = createInstance('Animation')
+    anim.name = name
+    anim.set('Length', Math.max(0.1, +clip.duration.toFixed(3)))
+    anim.set('Looped', true)
+    writeTracks(anim, clipToTracks(clip, mesh.rig!))
+    anim.setParent(player)
+  }
+  editor.log('info', `Imported "${part.name}" with ${countBones(mesh.rig!)} bones and ${mesh.clips.length} animation${mesh.clips.length === 1 ? '' : 's'} (${[...used].join(', ')}).`)
+}
+const countBones = (rig: NonNullable<LoadedMesh['rig']>): number => rig.reduce((n, b) => n + 1 + countBones(b.children), 0)
+
+/** For a MeshPart without a Skeleton (imported earlier, or its MeshId changed): bring in its model's rig. */
+export async function importRigFor(part: Instance) {
+  const mesh = await loadMesh(part.get<string>('MeshId') ?? '')
+  if (!mesh?.rig) { editor.log('warn', `"${part.name}": its model has no rig (no skinned mesh with bones).`); return }
+  if (part.findFirstChild('Skeleton')) return
+  editor.mutate(() => importRig(part, mesh))
 }

@@ -42,6 +42,15 @@ interface PartView {
   ownMaterials?: boolean
   /** active custom Shader material (replaces the part's material) */
   shader?: ShaderMat | null
+  /** Bone instances -> bones of the loaded (cloned) skeleton */
+  bones?: Map<Instance, THREE.Bone>
+  boneHelper?: THREE.SkeletonHelper
+}
+
+/** The part a Bone/Skeleton belongs to. */
+function rigPart(inst: Instance): BasePart | null {
+  for (let i: Instance | null = inst.parent; i; i = i.parent) if (i instanceof BasePart) return i
+  return null
 }
 
 /** Local transform (in part space, before scaling) for a decal on each face. */
@@ -86,6 +95,9 @@ export class SceneRenderer {
   private localTransparency = new Map<Instance, number>()
   /** parts whose Shader child changed: re-applied before the next frame */
   private shaderDirty = new Set<Instance>()
+  /** parts whose Skeleton/Bones were added or removed: re-bound before the next frame */
+  private rigDirty = new Set<Instance>()
+  private boneMarker: THREE.Mesh
   private screen: { composer: EffectComposer; passes: Array<{ shader: Instance; pass: ShaderPass; sm: ShaderMat }>; key: string } | null = null
   private screenDirty = true
   private disposeShaderFailed: () => void
@@ -131,6 +143,12 @@ export class SceneRenderer {
     this.hoverBox.renderOrder = 998
     this.hoverBox.visible = false
     this.scene.add(this.hoverBox)
+
+    // the selected bone (drawn on top)
+    this.boneMarker = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x4aa3ff, depthTest: false, transparent: true, opacity: 0.9 }))
+    this.boneMarker.renderOrder = 999
+    this.boneMarker.visible = false
+    this.scene.add(this.boneMarker)
 
     this.resizeObserver = new ResizeObserver(() => this.resize())
     this.resizeObserver.observe(container)
@@ -186,10 +204,84 @@ export class SceneRenderer {
       this.hoverBox.box.copy(this.boundsOf(this.hovered))
       this.hoverBox.visible = !this.hoverBox.box.isEmpty()
     } else this.hoverBox.visible = false
+    this.updateRigs()
     this.updateShaders()
     const screen = this.screenPasses()
     if (screen) screen.composer.render()
     else this.renderer.render(this.scene, this.camera)
+  }
+
+  // ------------------------------------------------------------------ rigs
+  /** Match the part's Bone instances to the bones of its loaded skeleton (by name, in order). */
+  private bindRig(part: BasePart, v: PartView) {
+    v.bones = new Map()
+    if (v.boneHelper) { this.scene.remove(v.boneHelper); v.boneHelper.dispose(); v.boneHelper = undefined }
+    const skel = part.children.find((c) => c.className === 'Skeleton')
+    if (!v.loaded || !skel) return
+    const roots: THREE.Bone[] = []
+    v.loaded.traverse((o) => { if ((o as THREE.Bone).isBone && !(o.parent as THREE.Bone | null)?.isBone) roots.push(o as THREE.Bone) })
+    const match = (insts: Instance[], bones: THREE.Object3D[]) => {
+      const pool = new Map<string, THREE.Bone[]>()
+      for (const b of bones) if ((b as THREE.Bone).isBone) (pool.get(b.name) ?? pool.set(b.name, []).get(b.name)!).push(b as THREE.Bone)
+      for (const bi of insts) {
+        if (bi.className !== 'Bone') continue
+        const bone = pool.get(bi.name)?.shift()
+        if (!bone) continue
+        v.bones!.set(bi, bone)
+        this.applyBone(bi, bone)
+        match(bi.children, bone.children)
+      }
+    }
+    match(skel.children, roots)
+    v.boneHelper = new THREE.SkeletonHelper(v.loaded)
+    ;(v.boneHelper.material as THREE.LineBasicMaterial).depthTest = false
+    v.boneHelper.renderOrder = 998
+    v.boneHelper.visible = false
+    this.scene.add(v.boneHelper)
+  }
+
+  /** bone pose = rest (CFrame) * animated offset (Transform) */
+  private applyBone(inst: Instance, bone: THREE.Bone) {
+    const cf = inst.get<CFrame>('CFrame').mul(inst.get<CFrame>('Transform'))
+    bone.position.set(cf.x, cf.y, cf.z)
+    bone.quaternion.copy(cf.toQuaternion() as unknown as THREE.Quaternion)
+  }
+
+  private rigTouched(inst: Instance) {
+    if (inst.className !== 'Bone' && inst.className !== 'Skeleton') return
+    const part = rigPart(inst)
+    if (part) this.rigDirty.add(part)
+  }
+
+  private updateRigs() {
+    for (const p of this.rigDirty) { const v = this.views.get(p); if (v) this.bindRig(p as BasePart, v) }
+    this.rigDirty.clear()
+    // skeleton lines while working with a rig; a marker on the selected bone
+    let marker: THREE.Vector3 | null = null
+    for (const [part, v] of this.views) {
+      if (!v.boneHelper) continue
+      const skel = part.children.find((c) => c.className === 'Skeleton')
+      const selected = this.selection.some((s) => (s.className === 'Bone' || s.className === 'Skeleton') && s.isDescendantOf(part))
+      v.boneHelper.visible = v.obj.visible && (selected || !!skel?.get<boolean>('ShowBones'))
+      for (const s of this.selection) {
+        const b = s.className === 'Bone' ? v.bones?.get(s) : undefined
+        if (b) marker = b.getWorldPosition(new THREE.Vector3())
+      }
+    }
+    this.boneMarker.visible = !!marker
+    if (marker) {
+      this.boneMarker.position.copy(marker)
+      this.boneMarker.scale.setScalar(Math.max(0.05, this.camera.position.distanceTo(marker) * 0.008))
+    }
+  }
+
+  /** The three.js bone driven by a Bone instance (editor gizmo), if its model is loaded. */
+  boneObject(inst: Instance): THREE.Bone | null {
+    const part = rigPart(inst)
+    const v = part ? this.views.get(part) : undefined
+    const b = v?.bones?.get(inst) ?? null
+    if (b) b.updateWorldMatrix(true, false)
+    return b
   }
 
   // ------------------------------------------------------------------ custom shaders
@@ -355,6 +447,7 @@ export class SceneRenderer {
     }
     if (inst.className === 'Lighting') this.applyLighting()
     this.shaderTouched(inst)
+    this.rigTouched(inst)
   }
 
   /** A Shader/ScreenShader was added, removed, moved or edited. */
@@ -365,11 +458,13 @@ export class SceneRenderer {
 
   private remove(inst: Instance) {
     this.shaderTouched(inst)
+    this.rigTouched(inst)
     const v = this.views.get(inst)
     if (v) {
       this.scene.remove(v.obj)
       v.material.dispose()
       v.shader?.material.dispose()
+      if (v.boneHelper) { this.scene.remove(v.boneHelper); v.boneHelper.dispose() }
       this.views.delete(inst)
     }
     const d = this.decals.get(inst)
@@ -406,6 +501,13 @@ export class SceneRenderer {
     if (this.decals.has(inst)) { this.updateDecal(inst); return }
     if (this.lights.has(inst)) { this.updateLight(inst); return }
     if (inst.className === 'Lighting') this.applyLighting()
+    if (inst.className === 'Bone' && (prop === 'CFrame' || prop === 'Transform')) {
+      const part = rigPart(inst)
+      const bone = part ? this.views.get(part)?.bones?.get(inst) : undefined
+      if (bone) this.applyBone(inst, bone)
+      return
+    }
+    if (inst.className === 'Bone' && prop === 'Name') this.rigTouched(inst)
     // Shader edits; shaderMaterial reuses the compiled material unless the source or attribute types changed
     this.shaderTouched(inst)
   }
@@ -443,6 +545,7 @@ export class SceneRenderer {
         v.obj.add(clone)
         v.mesh.visible = false
         this.updateMaterial(part, v)
+        this.bindRig(part, v)
       })
       return
     }

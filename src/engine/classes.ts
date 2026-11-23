@@ -464,6 +464,46 @@ defineClass(Sound, {
   events: ['Ended', 'Played'],
 })
 
+// ---- Rigs --------------------------------------------------------------------
+/** The rig of an imported skinned MeshPart: a tree of Bones mirroring the model's skeleton. */
+export class Skeleton extends Instance {}
+defineClass(Skeleton, {
+  name: 'Skeleton', superclass: 'Instance', category: 'Animation',
+  props: { ShowBones: { type: 'bool', category: 'Appearance' } },
+})
+/**
+ * One bone of a Skeleton. CFrame is its rest pose relative to its parent bone (in the model's own
+ * units); Transform is an extra offset on top of it, which is what animations change (identity = rest).
+ */
+export class Bone extends Instance {}
+defineClass(Bone, {
+  name: 'Bone', superclass: 'Instance', category: 'Animation',
+  props: {
+    CFrame: { type: 'CFrame', default: () => CFrame.identity, category: 'Rest pose' },
+    Position: {
+      type: 'Vector3', category: 'Rest pose',
+      get: (b: Instance) => b.get<CFrame>('CFrame').position,
+      set: (b: Instance, v: Vector3) => b.set('CFrame', b.get<CFrame>('CFrame').withPosition(v)),
+    },
+    Orientation: {
+      type: 'Vector3', category: 'Rest pose',
+      get: (b: Instance) => b.get<CFrame>('CFrame').toOrientation(),
+      set: (b: Instance, v: Vector3) => b.set('CFrame', CFrame.fromOrientation(b.get<CFrame>('CFrame').position, v)),
+    },
+    Transform: { type: 'CFrame', default: () => CFrame.identity, category: 'Pose' },
+    PoseOffset: {
+      type: 'Vector3', category: 'Pose',
+      get: (b: Instance) => b.get<CFrame>('Transform').position,
+      set: (b: Instance, v: Vector3) => b.set('Transform', b.get<CFrame>('Transform').withPosition(v)),
+    },
+    PoseRotation: {
+      type: 'Vector3', category: 'Pose',
+      get: (b: Instance) => b.get<CFrame>('Transform').toOrientation(),
+      set: (b: Instance, v: Vector3) => b.set('Transform', CFrame.fromOrientation(b.get<CFrame>('Transform').position, v)),
+    },
+  },
+})
+
 // ---- Animation ---------------------------------------------------------------
 /** Keyframes for any properties of the AnimationPlayer's parent and the objects inside it. */
 export class Animation extends Instance {}
