@@ -1,6 +1,8 @@
 // The built-in class library: Roblox-style Instances available to Luau scripts.
 import { CFrame, Color3, UDim, UDim2, Vector2, Vector3, enumItem, EnumItem } from './datatypes'
 import { register2DClasses } from './classes2d'
+import type { SaveStore } from './save'
+import { listMap } from './tables'
 import { DEFAULT_SCREEN_SHADER_SOURCE, DEFAULT_SHADER_SOURCE } from './shaderDefaults'
 import {
   DataModelLike, DataModelObserver, Instance, createInstance, defineClass, getClass, isA, setEnumResolver,
@@ -28,6 +30,9 @@ export interface Runtime {
   humanoidJump(h: Instance): void
   soundControl(sound: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume'): void
   animationControl(player: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume' | 'Seek', arg?: unknown): void
+  saveStore(): SaveStore
+  /** a script set an attribute on SaveService: save it too */
+  saveAttributeSet(key: string, value: unknown): void
   kick(player: Instance, message: string): void
   time(): number
 }
@@ -99,6 +104,7 @@ defineClass(InstanceBase, {
       self.fire('AttributeChanged', key)
       self.fire('AttributeChanged:' + key)
       self.dataModel?.notifyChanged(self, 'Attributes')
+      if (self.className === 'SaveService') (self.dataModel as DataModel | null)?.runtime?.saveAttributeSet(key, value ?? null)
     },
     GetAttributes: (self: Instance) => new Map(self.attributes),
     GetTags: (self: Instance) => tagsOf(self),
@@ -122,7 +128,7 @@ function removeTag(i: Instance, tag: string) {
 }
 
 // ---- DataModel ---------------------------------------------------------------
-export const SERVICE_ORDER = ['Workspace', 'World2D', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService']
+export const SERVICE_ORDER = ['Workspace', 'World2D', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService', 'SaveService']
 /**
  * RossEngine games run entirely on the player's machine, so there is no server/client split:
  * one Script class, scripts run in ScriptService, and Storage holds modules and templates.
@@ -715,6 +721,41 @@ service('ScriptService')
 service('Storage')
 service('StarterGui')
 service('SoundService')
+/**
+ * Save data that stays on the player's machine between plays. Values save automatically; slots let
+ * players keep several saves. Attributes you give SaveService in the editor are the starting values.
+ */
+const save = (self: Instance) => rt(self).saveStore()
+service('SaveService', {
+  Slot: { type: 'string', readonly: true, noSave: true, category: 'Save' },
+  AutoSave: { type: 'bool', default: () => true, category: 'Save' },
+}, {
+  Get: (self: Instance, key: unknown, fallback: unknown) => save(self).get(str(key), fallback ?? null),
+  Set: (self: Instance, key: unknown, value: unknown) => { save(self).set(str(key), value) },
+  Update: (self: Instance, key: unknown, fn: unknown) => {
+    if (typeof fn !== 'function') throw new Error('SaveService:Update needs a function: Update(key, function(old) return new end)')
+    const s = save(self), k = str(key)
+    s.set(k, (fn as (old: unknown) => unknown)(s.get(k)))
+    return s.get(k)
+  },
+  Increment: (self: Instance, key: unknown, delta: unknown) => {
+    const s = save(self), k = str(key)
+    const v = Number(s.get(k, 0)) + (delta == null ? 1 : Number(delta))
+    if (!Number.isFinite(v)) throw new Error(`SaveService:Increment: "${k}" isn't a number`)
+    s.set(k, v)
+    return v
+  },
+  Remove: (self: Instance, key: unknown) => { save(self).remove(str(key)) },
+  Has: (self: Instance, key: unknown) => save(self).has(str(key)),
+  GetAll: (self: Instance) => save(self).all(),
+  Clear: (self: Instance) => { save(self).clear() },
+  Save: (self: Instance) => { save(self).flush() },
+  SetSlot: (self: Instance, name: unknown) => { save(self).load(str(name)) },
+  GetSlot: (self: Instance) => save(self).slot,
+  ListSlots: (self: Instance) => listMap(save(self).listSlots()),
+  DeleteSlot: (self: Instance, name: unknown) => { save(self).deleteSlot(str(name)) },
+  HasSave: (self: Instance) => save(self).hasSave(),
+}, ['Changed', 'Loaded', 'Saved'])
 service('StarterPlayer', {
   CharacterWalkSpeed: { type: 'number', default: () => 16, category: 'Character' },
   CharacterJumpPower: { type: 'number', default: () => 50, category: 'Character' },

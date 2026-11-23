@@ -5,9 +5,10 @@ import { serialize, SerializedInstance } from '../engine/instance'
 import { demoPlace } from '../engine/templates'
 import { DevConsole } from './DevConsole'
 import { assets, SerializedAsset } from '../engine/assets'
+import { SaveBackend, localStorageBackend } from '../engine/save'
 
 declare global {
-  interface Window { rossPlayer?: { loadGame(): Promise<string | null>; title?: string } }
+  interface Window { rossPlayer?: { loadGame(): Promise<string | null>; title?: string; save?: SaveBackend } }
 }
 
 async function loadPlace(): Promise<{ name: string; root: SerializedInstance; assets?: SerializedAsset[] }> {
@@ -36,6 +37,8 @@ async function main() {
   assets.load(place.assets)
   ;(window as any).__session = await GameSession.start(container, place.root, {
     output: (kind, msg, source) => consoleUi.log(kind, msg, source),
+    // exported game: files in its app-data folder; in a browser: localStorage, per game
+    saveBackend: window.rossPlayer?.save ?? localStorageBackend(`ross-save:${place.name || 'game'}:`),
   })
 }
 

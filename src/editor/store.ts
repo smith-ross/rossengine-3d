@@ -1,4 +1,5 @@
 // Central editor state. React components subscribe via useEditor().
+import { localStorageBackend } from '../engine/save'
 import { useSyncExternalStore } from 'react'
 import '../engine/classes'
 import { DataModel } from '../engine/classes'
@@ -314,6 +315,17 @@ class EditorStore {
   }
   clearLogs() { this.logs = []; this.emit() }
 
+  // ------------------------------------------------------------------ save data (Play mode)
+  /** Play mode keeps SaveService slots in the browser, separately for each place. */
+  saveBackend() { return localStorageBackend(`ross-save:${this.placeName}:`) }
+  /** Forget this place's Play-mode save data (all slots). */
+  clearSaveData() {
+    const b = this.saveBackend()
+    const slots = b.list()
+    for (const s of slots) b.remove(s)
+    this.log('system', slots.length ? `Cleared save data for "${this.placeName}" (${slots.join(', ')})` : `"${this.placeName}" has no save data`)
+  }
+
   // ------------------------------------------------------------------ play
   playContainer: HTMLElement | null = null
 
@@ -327,6 +339,7 @@ class EditorStore {
       this.log('system', 'Starting game…')
       const session = await GameSession.start(this.playContainer, this.snapshot(), {
         output: (kind, message, source) => this.log(kind, message, source),
+        saveBackend: this.saveBackend(),
       })
       this.session = session
       this.playing = true

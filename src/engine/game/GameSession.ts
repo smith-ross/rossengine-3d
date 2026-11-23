@@ -19,6 +19,7 @@ import { Renderer2D } from '../render/Renderer2D'
 import { Physics2D, initPhysics2D } from '../physics/Physics2D'
 import { Animator2D } from './Animator2D'
 import { AnimationRunner } from '../animation'
+import { DEFAULT_SLOT, SaveBackend, SaveStore, attributeFriendly } from '../save'
 import { Runtime2D, isNode2D, setWorldPosition, worldPosition } from '../classes2d'
 import { assets } from '../assets'
 
@@ -27,6 +28,8 @@ export interface SessionOptions {
   playerName?: string
   /** where Pyodide's files are served (defaults to ./pyodide/ next to the page) */
   pythonIndexURL?: string
+  /** where SaveService keeps its slots (none: saves last only while the game runs) */
+  saveBackend?: SaveBackend | null
 }
 
 export class GameSession implements Runtime, Runtime2D {
@@ -40,6 +43,8 @@ export class GameSession implements Runtime, Runtime2D {
   phys2d: Physics2D | null = null
   private animator = new Animator2D()
   private animations = new AnimationRunner((inst, event, ...args) => inst.fire(event, ...args))
+  private save!: SaveStore
+  private syncingSave = false
   scripts!: ScriptHost
   gui!: GuiRenderer
   private tweens = new TweenManager()
@@ -126,11 +131,14 @@ export class GameSession implements Runtime, Runtime2D {
           else if (this.running.has(inst)) { this.running.delete(inst); this.scripts.kill(inst) }
         }
         if (inst.className === 'Sound') this.soundChanged(inst, prop)
+        if (inst.className === 'SaveService' && prop === 'AutoSave') this.save.autoSave = inst.get<boolean>('AutoSave') !== false
       },
     }))
 
     this.bindInput()
 
+    // 0. save data, so scripts can read it straight away
+    this.setupSave()
     // 1. server scripts
     for (const d of game.getDescendants()) this.maybeRunScript(d)
     this.scripts.step(0)
@@ -148,6 +156,7 @@ export class GameSession implements Runtime, Runtime2D {
 
   stop() {
     if (this.stopped) return
+    this.save?.flush()
     this.stopped = true
     if (this.respawnTimer) clearTimeout(this.respawnTimer)
     for (const c of this.cleanup) c()
@@ -621,6 +630,48 @@ export class GameSession implements Runtime, Runtime2D {
     this.stop()
   }
   time() { return this.gameTime }
+
+  // ------------------------------------------------------------------ save data
+  private setupSave() {
+    const svc = this.game.getService('SaveService')
+    // SaveService's attributes in the editor are the starting values for a new save
+    const defaults = new Map(svc.attributes)
+    const mirror = (key: string, value: unknown) => {
+      // simple values also live as attributes, so GetAttribute / GetAttributeChangedSignal work
+      this.syncingSave = true
+      try {
+        if (value != null && attributeFriendly(value)) svc.attributes.set(key, value)
+        else svc.attributes.delete(key)
+        svc.fire('AttributeChanged', key)
+        svc.fire('AttributeChanged:' + key)
+      } finally { this.syncingSave = false }
+    }
+    this.save = new SaveStore(this.opts.saveBackend ?? null, defaults, {
+      changed: (key, value) => { mirror(key, value); svc.fire('Changed', key, value); this.game.notifyChanged(svc, 'Attributes') },
+      loaded: (slot) => {
+        svc.set('Slot', slot)
+        for (const k of new Set([...svc.attributes.keys(), ...this.save.all().keys()])) mirror(k, this.save.get(k))
+        this.game.notifyChanged(svc, 'Attributes')
+        svc.fire('Loaded', slot)
+      },
+      saved: (slot) => svc.fire('Saved', slot),
+      warn: (message) => this.opts.output('warn', message, 'SaveService'),
+    })
+    this.save.autoSave = svc.get<boolean>('AutoSave') !== false
+    this.save.load(DEFAULT_SLOT)
+    // closing the window / tab: write anything not saved yet
+    const flush = () => this.save.flush()
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    this.cleanup.push(() => { window.removeEventListener('pagehide', flush); window.removeEventListener('beforeunload', flush) })
+  }
+
+  saveStore() { return this.save }
+  saveAttributeSet(key: string, value: unknown) {
+    if (this.syncingSave) return
+    this.syncingSave = true
+    try { this.save.set(key, value) } finally { this.syncingSave = false }
+  }
 
   animationControl(player: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume' | 'Seek', arg?: unknown) {
     switch (action) {

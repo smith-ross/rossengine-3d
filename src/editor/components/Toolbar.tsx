@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
   MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload, Layers,
+  Trash2,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
 import { insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
@@ -82,6 +83,7 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
               <div className="menu-item" onClick={() => savePlace(true)}><span><Save size={13} /> Save As…</span><span className="menu-shortcut">Ctrl+Shift+S</span></div>
               <div className="menu-sep" />
               <div className="menu-item" onClick={onBuild}><span><Hammer size={13} /> Build Game…</span></div>
+              <div className="menu-item" title="Play mode remembers SaveService data between plays; start fresh" onClick={() => { if (window.confirm(`Delete the save data your Play tests of "${editor.placeName}" have made?`)) editor.clearSaveData() }}><span><Trash2 size={13} /> Clear Save Data</span></div>
             </div>
           )}
         </Drop>

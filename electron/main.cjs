@@ -34,6 +34,18 @@ function readGame() {
   try { return { file, text: fs.readFileSync(file, 'utf8') } } catch { return null }
 }
 
+// Every exported game runs this same player app, so give each game its own app-data folder (named
+// after the game): its save slots never mix with another game's. Must happen before the app is ready.
+{
+  let gameName = null
+  try { const g = readGame(); if (g) gameName = JSON.parse(g.text).name } catch { /* no game yet */ }
+  const safe = String(gameName || '').replace(/[^\w\- ]+/g, '').trim().slice(0, 64)
+  if (safe) {
+    app.setName(safe)
+    app.setPath('userData', path.join(app.getPath('appData'), 'RossEngine Games', safe))
+  }
+}
+
 function createWindow() {
   const game = readGame()
   let settings = {}
@@ -110,6 +122,25 @@ app.whenReady().then(() => {
       headers: { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' },
     })
   })
+  // SaveService slots: <app data>/Saves/<slot>.json. Only simple names, only that folder.
+  const savesDir = () => path.join(app.getPath('userData'), 'Saves')
+  const slotFile = (slot) => {
+    if (typeof slot !== 'string' || !/^[\w\- ]{1,48}$/.test(slot)) throw new Error('bad save slot name')
+    return path.join(savesDir(), `${slot}.json`)
+  }
+  const reply = (e, fn) => { try { e.returnValue = { ok: true, value: fn() } } catch (err) { e.returnValue = { ok: false, error: String(err?.message ?? err) } } }
+  ipcMain.on('ross:save-read', (e, slot) => reply(e, () => { const f = slotFile(slot); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null }))
+  ipcMain.on('ross:save-write', (e, slot, json) => reply(e, () => {
+    if (typeof json !== 'string' || json.length > 50 * 1024 * 1024) throw new Error('save data too large')
+    const f = slotFile(slot)
+    fs.mkdirSync(savesDir(), { recursive: true })
+    fs.writeFileSync(f + '.tmp', json) // write then rename, so a crash never leaves half a save
+    fs.renameSync(f + '.tmp', f)
+    return true
+  }))
+  ipcMain.on('ross:save-list', (e) => reply(e, () => (fs.existsSync(savesDir()) ? fs.readdirSync(savesDir()).filter((n) => n.endsWith('.json')).map((n) => n.slice(0, -5)).sort() : [])))
+  ipcMain.on('ross:save-delete', (e, slot) => reply(e, () => { const f = slotFile(slot); if (fs.existsSync(f)) fs.rmSync(f); return true }))
+
   ipcMain.handle('ross:load-game', () => {
     const g = readGame()
     return g ? g.text : null

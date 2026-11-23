@@ -150,7 +150,7 @@ export class PythonRuntime implements LanguageRuntime {
       importModule: (fullname: string) => {
         const inst = resolveModule(fullname, this.importer(), '.')
         if (!inst) throw new Error(`No module named '${fullname}'`)
-        return host.requireModule(inst)
+        return this.toPy(host.requireModule(inst), false)
       },
     }
     ;(py.globals.get('__ross_reset') as (b: unknown) => void)(bridge)
@@ -166,7 +166,89 @@ export class PythonRuntime implements LanguageRuntime {
   private apiFor(script: Instance) {
     const g = this.host.globalsFor(script, '.')
     delete g.print // Python keeps its own print (sep=, end=, file=...), routed to the Output
-    return g
+    const api: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(g)) api[k] = this.toPy(v, false)
+    return api
+  }
+
+  // ------------------------------------------------------------------ the Python view of the API
+  // Scripts see the same API objects as TypeScript, through a thin wrapper that makes plain data
+  // feel like Python: what calls return comes back as real lists and dicts (save data, JSONDecode,
+  // GetChildren...), a missing result is None, and values going the other way are unwrapped again.
+  private wrapped = new WeakMap<object, object>()
+  private rawOf = new WeakMap<object, object>()
+
+  /** JS -> Python. `fromCall`: a call's result, where plain objects become dicts (not for namespaces like task). */
+  private toPy(v: unknown, fromCall: boolean): unknown {
+    if (v === null || v === undefined) return undefined // None
+    if (typeof v !== 'object' && typeof v !== 'function') return v
+    if (this.host.foreign?.isProxy(v)) return v // already Python
+    if (v instanceof Promise) return v.then((x) => this.toPy(x, true))
+    if (Array.isArray(v)) {
+      const list = (this.py.globals.get('list') as () => { append(x: unknown): void })()
+      for (const x of v) list.append(this.toPy(x, fromCall))
+      return list
+    }
+    if (fromCall && typeof v === 'object' && !this.host.unwrap(v) && isPlainObject(v)) {
+      const dict = (this.py.globals.get('dict') as () => { set(k: unknown, x: unknown): void })()
+      for (const k of Object.keys(v)) dict.set(k, this.toPy((v as Record<string, unknown>)[k], true))
+      return dict
+    }
+    return this.wrap(v as object)
+  }
+
+  /** Python -> JS (arguments and callback results): unwrap, convert lists/dicts, keep callbacks alive. */
+  private fromPy(v: unknown): unknown {
+    if (v === null || v === undefined || (typeof v !== 'object' && typeof v !== 'function')) return v
+    const raw = this.rawOf.get(v as object)
+    if (raw) return raw
+    if (this.host.foreign?.isProxy(v)) {
+      const pv = v as { copy?: () => unknown; toJs?: (o: unknown) => unknown; type?: string }
+      if (typeof v === 'function') {
+        // a Python callback: keep it past this call and give it Python-friendly arguments
+        const kept = (pv.copy ? pv.copy() : v) as (...a: unknown[]) => unknown
+        return (...args: unknown[]) => this.fromPy(kept(...args.map((a) => this.toPy(a, true))))
+      }
+      if (pv.type === 'coroutine' || pv.type === 'Future' || pv.type === 'Task') return v
+      return this.unwrapDeep(pv.toJs!({ dict_converter: (e: Iterable<[unknown, unknown]>) => new Map(e) }))
+    }
+    return v
+  }
+
+  private unwrapDeep(v: unknown): unknown {
+    if (v === null || typeof v !== 'object') return v
+    const raw = this.rawOf.get(v)
+    if (raw) return raw
+    if (Array.isArray(v)) return v.map((x) => this.unwrapDeep(x))
+    if (v instanceof Map) return new Map([...v].map(([k, x]) => [k, this.unwrapDeep(x)]))
+    return v
+  }
+
+  /** A proxy for an API object (instance, signal, datatype, namespace...): converts what flows through it. */
+  private wrap(obj: object): object {
+    const hit = this.wrapped.get(obj)
+    if (hit) return hit
+    const rt = this
+    const handler: ProxyHandler<any> = {
+      get(t, k) {
+        const x = Reflect.get(t, k)
+        if (typeof k === 'symbol') return x
+        // frozen properties must come back unchanged (a Proxy rule)
+        const d = Reflect.getOwnPropertyDescriptor(t, k)
+        if (d && !d.configurable && !d.writable && 'value' in d) return x
+        // methods stay wrapped functions; called with `this` = the wrapper, unwrapped in apply
+        return rt.toPy(x, false)
+      },
+      set(t, k, val) { return Reflect.set(t, k, rt.fromPy(val)) },
+      apply(t, thisArg, args) {
+        const self = thisArg && typeof thisArg === 'object' ? rt.rawOf.get(thisArg) ?? thisArg : thisArg
+        return rt.toPy(Reflect.apply(t, self, args.map((a) => rt.fromPy(a))), true)
+      },
+    }
+    const proxy = new Proxy(obj, handler)
+    this.wrapped.set(obj, proxy)
+    this.rawOf.set(proxy, obj)
+    return proxy
   }
 
   runScript(script: Instance) {
@@ -196,3 +278,5 @@ export class PythonRuntime implements LanguageRuntime {
     return top ? `${top[0]}:${top[1]}: ${last}${trace ? '\n' + trace : ''}` : last
   }
 }
+
+const isPlainObject = (v: object) => { const p = Object.getPrototypeOf(v); return p === Object.prototype || p === null }

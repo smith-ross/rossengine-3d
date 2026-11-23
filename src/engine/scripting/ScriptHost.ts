@@ -1,6 +1,7 @@
 // The JavaScript-side scripting API, shared by TypeScript scripts (directly) and Python scripts
 // (through Pyodide's JS proxies). It also owns the cross-language module registry: require() from
 // any language goes through here, so Luau, TypeScript and Python modules can import each other.
+import { isListMap, listMap } from '../tables'
 import { CFrame, Color3, EnumItem, Enums, UDim, UDim2, Vector2, Vector3, enumItem } from '../datatypes'
 import { Instance, addEventSink, createInstance, getClass, isA } from '../instance'
 import { DataModel, Multi } from '../classes'
@@ -154,14 +155,15 @@ export class ScriptHost {
     if (v instanceof Multi) return v.values.map((x) => this.toApi(x))
     if (Array.isArray(v)) return v.map((x) => this.toApi(x))
     if (v instanceof Map) {
-      const keys = [...v.keys()]
-      if (keys.length && keys.every((k, i) => k === i + 1)) return [...v.values()].map((x) => this.toApi(x))
+      if (isListMap(v)) return [...v.values()].map((x) => this.toApi(x))
       const o: Record<string, unknown> = {}
       for (const [k, x] of v) o[String(k)] = this.toApi(x)
       return o
     }
     return v
   }
+
+  private callbackWrappers = new WeakMap<object, Fn>()
 
   /** API value (JS or Python) -> engine value */
   fromApi(v: unknown): unknown {
@@ -173,6 +175,17 @@ export class ScriptHost {
       if (typeof v === 'function') return this.foreign.keep(v)
       return this.fromApi(this.foreign.toJs(v))
     }
+    if (typeof v === 'function') {
+      // a script callback the engine will call (e.g. SaveService:Update): give it API values, take
+      // engine values back. One wrapper per function, so passing the same function twice matches.
+      let w = this.callbackWrappers.get(v)
+      if (!w) {
+        const fn = v as Fn
+        w = (...args: unknown[]) => this.fromApi(fn(...args.map((a) => this.toApi(a))))
+        this.callbackWrappers.set(v, w)
+      }
+      return w
+    }
     if (v instanceof RaycastParams) {
       return new Map<string, unknown>([
         ['FilterDescendantsInstances', this.fromApi(v.FilterDescendantsInstances)],
@@ -180,7 +193,7 @@ export class ScriptHost {
         ['RespectCanCollide', v.RespectCanCollide],
       ])
     }
-    if (Array.isArray(v)) return new Map(v.map((x, i) => [i + 1, this.fromApi(x)]))
+    if (Array.isArray(v)) return listMap(v.map((x) => this.fromApi(x)))
     if (v instanceof Map) return new Map([...v].map(([k, x]) => [k, this.fromApi(x)]))
     const proto = Object.getPrototypeOf(v)
     if (proto === Object.prototype || proto === null) return new Map(Object.entries(v as object).map(([k, x]) => [k, this.fromApi(x)]))

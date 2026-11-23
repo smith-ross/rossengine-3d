@@ -272,6 +272,35 @@ door.Speed = 2               -- door.Playing, door.CurrentAnimation, door.TimePo
 - **2D:** positions are already relative to the parent node.
 - **Events:** `Played`, `Stopped` and `Ended` (when a non-looping animation finishes).
 
+## Saving data
+
+`SaveService` keeps data on the player's machine between plays. There's no database to set up.
+
+```lua
+local Save = game:GetService("SaveService")
+
+local coins = Save:Get("Coins", 0)         -- default if there's no saved value
+Save:Set("Coins", coins + 10)              -- saved automatically, a moment later
+Save:Increment("Deaths")                   -- +1 (or Save:Increment("Coins", 5))
+Save:Update("Inventory", function(items)   -- read, change, write back
+	items = items or {}
+	table.insert(items, "Sword")
+	return items
+end)
+
+Save:GetAttributeChangedSignal("Coins"):Connect(updateHud)   -- simple values are also attributes
+```
+
+- **What can be saved:** numbers, strings, booleans, `Vector3`/`Vector2`/`Color3`/`CFrame`/`UDim2`, and tables of those (nested lists and dictionaries). Saving something else (an Instance or a function) gives an error that names the key.
+- **Starting values:** select **SaveService** in the Explorer and add attributes, e.g. `Coins = 0` or `Lives = 3`. A new save starts from these, and `Clear()` goes back to them.
+- **Automatic saving:** changes are written about half a second after they happen, and again when the game closes. Turn off **AutoSave** to write only when you call `Save:Save()`, for "save points".
+- **Slots:** use `Save:SetSlot("Slot 2")` to switch (the current one is saved first), plus `GetSlot()`, `ListSlots()`, `DeleteSlot(name)` and `HasSave()`, which suits a "Continue" button. The default slot is `Default`.
+- **Other methods:** `Has(key)`, `Remove(key)`, `GetAll()` and `Clear()`. Events: `Changed(key, value)`, `Loaded(slot)` and `Saved(slot)`.
+- **Where saves are stored:**
+  - **Exported games:** readable JSON files in `%APPDATA%\RossEngine Games\<game name>\Saves\<slot>.json`, one folder per game.
+  - **Editor Play mode:** the browser, per place. Use **File → Clear Save Data** to start fresh.
+- **TypeScript and Python** get the same API. Tables come back as arrays and objects in TypeScript, and as real lists and dicts in Python.
+
 ## Assets
 
 Sounds, images and 3D models are imported from files and saved inside the place file, so a game never needs an external ID or URL.
