@@ -34,6 +34,7 @@ export interface RigBone {
   name: string
   position: [number, number, number]
   quaternion: [number, number, number, number]
+  scale: [number, number, number]
   children: RigBone[]
 }
 
@@ -46,6 +47,7 @@ function readRig(root: THREE.Object3D): RigBone[] | null {
     name: b.name || 'Bone',
     position: [b.position.x, b.position.y, b.position.z],
     quaternion: [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w],
+    scale: [b.scale.x, b.scale.y, b.scale.z],
     children: b.children.filter((c) => (c as THREE.Bone).isBone).map((c) => toRig(c as THREE.Bone)),
   })
   return bones.filter((b) => !(b.parent as THREE.Bone | null)?.isBone).map(toRig)

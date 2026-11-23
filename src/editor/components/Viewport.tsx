@@ -58,7 +58,7 @@ export function Viewport() {
     let dragStart: {
       pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3>; side: THREE.Vector3
       /** posing a Bone: its world matrix and its parent's when the drag began */
-      bone?: { inst: Instance; startWorld: THREE.Matrix4; parentWorld: THREE.Matrix4 }
+      bone?: { inst: Instance; startWorld: THREE.Matrix4; parentWorld: THREE.Matrix4; startScale: Vector3 }
     } | null = null
     /** a single selected Bone whose model is loaded: the gizmo poses it */
     const selectedBone = () => {
@@ -85,7 +85,7 @@ export function Viewport() {
       const bone = selectedBone()
       const pivot = editor.playing ? null : bone ? worldCFrame(bone.obj.matrixWorld) : selectionPivot(sel)
       const tool = editor.tool
-      const visible = !!pivot && tool !== 'select' && !(tool === 'scale' && !(sel.length === 1 && sel[0] instanceof BasePart))
+      const visible = !!pivot && tool !== 'select' && !(tool === 'scale' && !bone && !(sel.length === 1 && sel[0] instanceof BasePart))
       helper.visible = visible
       tc.enabled = visible
       if (!pivot || dragStart) return
@@ -107,7 +107,7 @@ export function Viewport() {
           bone.obj.parent!.updateWorldMatrix(true, false)
           dragStart = {
             pivot: worldCFrame(bone.obj.matrixWorld), parts: new Map(), sizes: new Map(), side: new THREE.Vector3(),
-            bone: { inst: bone.inst, startWorld: bone.obj.matrixWorld.clone(), parentWorld: bone.obj.parent!.matrixWorld.clone() },
+            bone: { inst: bone.inst, startWorld: bone.obj.matrixWorld.clone(), parentWorld: bone.obj.parent!.matrixWorld.clone(), startScale: bone.inst.get<Vector3>('PoseScale') },
           }
           return
         }
@@ -140,6 +140,12 @@ export function Viewport() {
       if (dragStart.bone) {
         // new world pose = gizmo delta * start pose; back into the bone's space as an offset from rest
         const b = dragStart.bone
+        if (tc.mode === 'scale') {
+          // the gizmo sits in the bone's own axes: scale its pose size along them
+          const s = pivotObj.scale, st = b.startScale
+          b.inst.set('PoseScale', new Vector3(Math.max(0.01, st.x * s.x), Math.max(0.01, st.y * s.y), Math.max(0.01, st.z * s.z)))
+          return
+        }
         const delta = new THREE.Matrix4()
         now.mul(dragStart.pivot.inverse()).toMatrix4(delta)
         const local = b.parentWorld.clone().invert().multiply(delta.multiply(b.startWorld))

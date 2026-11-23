@@ -473,7 +473,8 @@ defineClass(Skeleton, {
 })
 /**
  * One bone of a Skeleton. CFrame is its rest pose relative to its parent bone (in the model's own
- * units); Transform is an extra offset on top of it, which is what animations change (identity = rest).
+ * units) and Scale its rest size; Transform (an extra offset) and PoseScale (a size multiplier) go on
+ * top, and are what animations change (identity / 1,1,1 = the rest pose).
  */
 export class Bone extends Instance {}
 defineClass(Bone, {
@@ -490,6 +491,7 @@ defineClass(Bone, {
       get: (b: Instance) => b.get<CFrame>('CFrame').toOrientation(),
       set: (b: Instance, v: Vector3) => b.set('CFrame', CFrame.fromOrientation(b.get<CFrame>('CFrame').position, v)),
     },
+    Scale: { type: 'Vector3', default: () => new Vector3(1, 1, 1), category: 'Rest pose' },
     Transform: { type: 'CFrame', default: () => CFrame.identity, category: 'Pose' },
     PoseOffset: {
       type: 'Vector3', category: 'Pose',
@@ -501,6 +503,8 @@ defineClass(Bone, {
       get: (b: Instance) => b.get<CFrame>('Transform').toOrientation(),
       set: (b: Instance, v: Vector3) => b.set('Transform', CFrame.fromOrientation(b.get<CFrame>('Transform').position, v)),
     },
+    /** multiplies Scale (1, 1, 1 = rest size); animatable */
+    PoseScale: { type: 'Vector3', default: () => new Vector3(1, 1, 1), category: 'Pose' },
   },
 })
 

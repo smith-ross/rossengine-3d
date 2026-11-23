@@ -1,7 +1,7 @@
 // Rigs from imported models: Skeleton/Bone instances, and the model's own animation clips turned
 // into Animations (bone Transform tracks) for an AnimationPlayer.
 import * as THREE from 'three'
-import { CFrame } from './datatypes'
+import { CFrame, Vector3 } from './datatypes'
 import { Instance, createInstance } from './instance'
 import type { RigBone } from './render/meshes'
 import { Track, encode } from './animation'
@@ -17,6 +17,8 @@ export function buildSkeleton(rig: RigBone[]): Instance {
     const bone = createInstance('Bone')
     bone.name = b.name
     bone.set('CFrame', cframeOf(b.position, b.quaternion))
+    const s = b.scale ?? [1, 1, 1]
+    bone.set('Scale', new Vector3(s[0], s[1], s[2]))
     bone.setParent(parent)
     for (const c of b.children) add(c, bone)
   }
@@ -60,11 +62,32 @@ function simplify(times: number[], values: CFrame[]): number[] {
   return keep
 }
 
-/** A file's animation clip as Animation tracks on the Skeleton's bones (Transform = offset from rest). */
+/** A clip's scale keys as a PoseScale track: the animated size divided by the bone's rest size. */
+function scaleTrack(ref: BoneRef, tr: THREE.KeyframeTrack): Track | null {
+  const rest = ref.rig.scale ?? [1, 1, 1]
+  const times = Array.from(tr.times)
+  const v = tr.values
+  const values = times.map((_t, i) => new Vector3(v[i * 3] / (rest[0] || 1), v[i * 3 + 1] / (rest[1] || 1), v[i * 3 + 2] / (rest[2] || 1)))
+  // exporters often write scale channels that never change: nothing to animate
+  if (values.every((x) => Math.abs(x.x - 1) < 1e-5 && Math.abs(x.y - 1) < 1e-5 && Math.abs(x.z - 1) < 1e-5)) return null
+  // drop keys a straight blend reproduces
+  const keep = [0]
+  for (let i = 1; i < values.length - 1; i++) {
+    const a = values[keep[keep.length - 1]], b = values[i + 1]
+    const u = (times[i] - times[keep[keep.length - 1]]) / Math.max(1e-6, times[i + 1] - times[keep[keep.length - 1]])
+    if (a.Lerp(b, u).sub(values[i]).magnitude > 1e-5) keep.push(i)
+  }
+  if (values.length > 1) keep.push(values.length - 1)
+  const track: Track = { path: ref.path, prop: 'PoseScale', keys: keep.map((i) => ({ t: +times[i].toFixed(4), v: encode(values[i]), ease: 'Linear', dir: 'InOut' })) }
+  if (ref.idx.some((n) => n > 0)) track.idx = ref.idx
+  return track
+}
+
+/** A file's animation clip as Animation tracks on the Skeleton's bones (Transform = offset from rest, PoseScale = size multiplier). */
 export function clipToTracks(clip: THREE.AnimationClip, rig: RigBone[]): Track[] {
   const bones = bonePaths(rig)
   const sanitized = new Map([...bones].map(([name, ref]) => [THREE.PropertyBinding.sanitizeNodeName(name), ref]))
-  const byBone = new Map<BoneRef, { pos?: THREE.KeyframeTrack; rot?: THREE.KeyframeTrack }>()
+  const byBone = new Map<BoneRef, { pos?: THREE.KeyframeTrack; rot?: THREE.KeyframeTrack; scl?: THREE.KeyframeTrack }>()
   for (const tr of clip.tracks) {
     const parsed = THREE.PropertyBinding.parseTrackName(tr.name)
     const ref = bones.get(parsed.nodeName) ?? sanitized.get(parsed.nodeName)
@@ -72,10 +95,12 @@ export function clipToTracks(clip: THREE.AnimationClip, rig: RigBone[]): Track[]
     const e = byBone.get(ref) ?? {}
     if (parsed.propertyName === 'position') e.pos = tr
     else if (parsed.propertyName === 'quaternion') e.rot = tr
+    else if (parsed.propertyName === 'scale') e.scl = tr
     byBone.set(ref, e)
   }
   const tracks: Track[] = []
-  for (const [ref, { pos, rot }] of byBone) {
+  for (const [ref, { pos, rot, scl }] of byBone) {
+    if (scl) { const st = scaleTrack(ref, scl); if (st) tracks.push(st) }
     if (!pos && !rot) continue
     const rest = cframeOf(ref.rig.position, ref.rig.quaternion)
     const restInv = rest.inverse()
@@ -88,6 +113,8 @@ export function clipToTracks(clip: THREE.AnimationClip, rig: RigBone[]): Track[]
       const q: ArrayLike<number> = ri ? Array.from(ri.evaluate(t) as ArrayLike<number>) : ref.rig.quaternion
       return restInv.mul(cframeOf(p, q))
     })
+    // a channel that stays at the rest pose the whole time: nothing to animate
+    if (values.every((c) => c.position.magnitude < 1e-5 && Math.abs(c.toQuaternion().w) > 1 - 1e-7)) continue
     const keep = simplify(times, values)
     const track: Track = { path: ref.path, prop: 'Transform', keys: keep.map((i) => ({ t: +times[i].toFixed(4), v: encode(values[i]), ease: 'Linear', dir: 'InOut' })) }
     if (ref.idx.some((n) => n > 0)) track.idx = ref.idx

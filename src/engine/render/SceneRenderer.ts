@@ -245,6 +245,8 @@ export class SceneRenderer {
     const cf = inst.get<CFrame>('CFrame').mul(inst.get<CFrame>('Transform'))
     bone.position.set(cf.x, cf.y, cf.z)
     bone.quaternion.copy(cf.toQuaternion() as unknown as THREE.Quaternion)
+    const s = inst.get<Vector3>('Scale'), ps = inst.get<Vector3>('PoseScale')
+    bone.scale.set((s?.x ?? 1) * (ps?.x ?? 1), (s?.y ?? 1) * (ps?.y ?? 1), (s?.z ?? 1) * (ps?.z ?? 1))
   }
 
   private rigTouched(inst: Instance) {
@@ -501,7 +503,7 @@ export class SceneRenderer {
     if (this.decals.has(inst)) { this.updateDecal(inst); return }
     if (this.lights.has(inst)) { this.updateLight(inst); return }
     if (inst.className === 'Lighting') this.applyLighting()
-    if (inst.className === 'Bone' && (prop === 'CFrame' || prop === 'Transform')) {
+    if (inst.className === 'Bone' && (prop === 'CFrame' || prop === 'Transform' || prop === 'Scale' || prop === 'PoseScale')) {
       const part = rigPart(inst)
       const bone = part ? this.views.get(part)?.bones?.get(inst) : undefined
       if (bone) this.applyBone(inst, bone)

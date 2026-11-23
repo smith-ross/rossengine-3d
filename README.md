@@ -249,9 +249,12 @@ Other behaviour:
 ### Rigged models
 
 Importing a rigged (skinned) model also imports its rig:
-- **Skeleton:** a `Skeleton` inside the MeshPart, with a `Bone` for every bone of the model. Each Bone has its rest pose (`CFrame`, also shown as `Position`/`Orientation`) and a `Transform` on top of it (also shown as `PoseOffset`/`PoseRotation`). The pose is drawn on the mesh live, in the editor and in games.
-- **Clips:** any animation clips in the file (glTF/FBX) become Animations in an AnimationPlayer on the MeshPart. Each has one `Transform` track per bone, with redundant keys removed.
-- **Posing:** select a Bone in the Explorer to see the skeleton, then use the **Move** and **Rotate** tools on it. With the Animation tab open, every pose you make is recorded as a keyframe, like any other property.
+- **Skeleton:** a `Skeleton` inside the MeshPart, with a `Bone` for every bone of the model.
+  - **Rest pose:** `CFrame` (also shown as `Position`/`Orientation`) and its size, `Scale`.
+  - **Pose on top:** `Transform` (also shown as `PoseOffset`/`PoseRotation`) and `PoseScale`, a size multiplier where 1, 1, 1 is the rest size.
+  - **Live:** the pose is drawn on the mesh in the editor and in games.
+- **Clips:** any animation clips in the file (glTF/FBX) become Animations in an AnimationPlayer on the MeshPart, with position, rotation and scale. Each has `Transform` and `PoseScale` tracks per bone. Redundant keys, and channels that never leave the rest pose, are removed.
+- **Posing:** select a Bone in the Explorer to see the skeleton, then use the **Move**, **Rotate** and **Scale** tools on it (scaling is along the bone's own axes). With the Animation tab open, every pose you make is recorded as a keyframe, like any other property.
 - **Older imports:** a MeshPart imported before this (or with a changed MeshId) can get its rig by right-clicking it and choosing **Import rig from model**.
 - **From scripts:** `bone.Transform = CFrame.Angles(0, 0, math.rad(30))`.
 
