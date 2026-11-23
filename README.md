@@ -32,6 +32,12 @@ Other scripts:
 
 Runtime test page without the editor: `http://localhost:5173/player.html?demo`.
 
+## Editing
+
+- **Move, Rotate and Scale tools** snap to the Move and Rotate step sizes in the toolbar.
+- **Scale** resizes from the handle you drag: the opposite face stays where it is. Hold **Ctrl** to grow both sides evenly, or drag the centre handle to scale the whole part from its middle.
+- **Camera:** hold the right mouse button to look around (the cursor stays in place), WASD/QE to fly, and the mouse wheel to zoom. **F** focuses the selection.
+
 ## Layout
 
 ```

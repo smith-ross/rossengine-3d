@@ -54,7 +54,15 @@ export function Viewport() {
     const helper = tc.getHelper()
     r.scene.add(helper)
     tc.setSize(0.9)
-    let dragStart: { pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3> } | null = null
+    /** side: which end of each axis was grabbed (+1/-1, 0 = scale from the middle) */
+    let dragStart: { pivot: CFrame; parts: Map<BasePart, CFrame>; sizes: Map<BasePart, Vector3>; side: THREE.Vector3 } | null = null
+    // hold Ctrl while scaling to grow both sides evenly (from the middle)
+    let ctrlHeld = false
+    const trackCtrl = (e: KeyboardEvent | PointerEvent) => { ctrlHeld = e.ctrlKey }
+    window.addEventListener('keydown', trackCtrl)
+    window.addEventListener('keyup', trackCtrl)
+    window.addEventListener('pointerdown', trackCtrl, true)
+    window.addEventListener('pointermove', trackCtrl, true)
 
     const syncGizmo = () => {
       const sel = editor.selection.filter((s) => s instanceof BasePart || s instanceof Model)
@@ -83,7 +91,16 @@ export function Viewport() {
         const pivot = selectionPivot(sel)
         if (!pivot) return
         editor.checkpoint()
-        dragStart = { pivot, parts, sizes }
+        // the grabbed handle, in the part's own axes: the opposite face stays put while scaling
+        const local = ((tc as unknown as { pointStart: THREE.Vector3 }).pointStart).clone().applyQuaternion(pivotObj.quaternion.clone().invert())
+        const axis = tc.axis ?? ''
+        const side = new THREE.Vector3(
+          axis.includes('X') ? Math.sign(local.x) : 0,
+          axis.includes('Y') ? Math.sign(local.y) : 0,
+          axis.includes('Z') ? Math.sign(local.z) : 0,
+        )
+        if (axis === 'XYZ') side.set(0, 0, 0) // the centre handle scales evenly
+        dragStart = { pivot, parts, sizes, side }
       } else {
         dragStart = null
         syncGizmo()
@@ -99,7 +116,12 @@ export function Viewport() {
         const snap = editor.snap || 0
         const q = (v: number) => (snap ? Math.max(snap, Math.round(v / snap) * snap) : Math.max(0.05, v))
         const s = pivotObj.scale
-        p.set('Size', new Vector3(q(start.x * s.x), q(start.y * s.y), q(start.z * s.z)))
+        const size = new Vector3(q(start.x * s.x), q(start.y * s.y), q(start.z * s.z))
+        p.set('Size', size)
+        // move the centre by half the growth towards the grabbed handle, so the other side doesn't move
+        const side = ctrlHeld ? new THREE.Vector3() : dragStart.side
+        const shift = new CFrame((size.x - start.x) / 2 * side.x, (size.y - start.y) / 2 * side.y, (size.z - start.z) / 2 * side.z)
+        p.set('CFrame', dragStart.parts.get(p)!.mul(shift))
         return
       }
       const delta = now.mul(dragStart.pivot.inverse())
@@ -319,6 +341,10 @@ export function Viewport() {
       window.removeEventListener('mouseup', onMouseUp)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('keydown', trackCtrl)
+      window.removeEventListener('keyup', trackCtrl)
+      window.removeEventListener('pointerdown', trackCtrl, true)
+      window.removeEventListener('pointermove', trackCtrl, true)
       tc.detach()
       tc.dispose()
       gui.dispose()
