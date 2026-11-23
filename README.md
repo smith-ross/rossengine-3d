@@ -28,6 +28,8 @@ Other scripts:
 
 **Desktop editor (RossEngine Studio):** `npm run build:studio` packages the editor as `studio-dist/RossEngine Studio-win32-x64/RossEngine Studio.exe` (~415 MB). It has native open/save dialogs and a File/Edit/Test menu, and builds games without Node: exports reuse Studio's own Electron runtime plus the bundled player, and land in `Documents/RossEngine Games` by default. `npm run studio` runs Studio against the dev server (`npm run dev`).
 
+**Releases and Ross Launcher:** every push to `main` runs `.github/workflows/release-studio.yml`. It bumps the patch version, runs the tests, builds Studio and publishes `RossEngine-Studio-win32-x64.zip` (about 180 MB) as a GitHub release. Ross Launcher lists **RossEngine Studio**, installs it from the latest release, offers updates, and opens it.
+
 Runtime test page without the editor: `http://localhost:5173/player.html?demo`.
 
 ## Layout
