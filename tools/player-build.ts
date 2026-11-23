@@ -42,7 +42,7 @@ export function templateUpToDate(platform: string = process.platform) {
 export async function buildRuntime(log: (m: string) => void = console.log) {
   log('Bundling game runtime…')
   await build({ configFile: path.join(ROOT, 'vite.player.config.ts'), logLevel: 'warn' })
-  for (const f of ['main.cjs', 'preload.cjs']) fs.copyFileSync(path.join(ROOT, 'electron', f), path.join(APP_DIR, f))
+  for (const f of ['main.cjs', 'preload.cjs', 'net-bridge.cjs']) fs.copyFileSync(path.join(ROOT, 'electron', f), path.join(APP_DIR, f))
   const electronVersion = require('electron/package.json').version
   fs.writeFileSync(path.join(APP_DIR, 'package.json'), JSON.stringify({
     name: 'rossplayer', productName: PLAYER_NAME, version: '0.1.0', main: 'main.cjs', description: 'RossEngine game player',

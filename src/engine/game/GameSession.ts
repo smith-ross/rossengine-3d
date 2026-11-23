@@ -3,7 +3,9 @@
 import * as THREE from 'three'
 import { CFrame, EnumItem, Vector2, Vector3, enumItem } from '../datatypes'
 import { Instance, SerializedInstance, createInstance, deserialize, isA } from '../instance'
-import { BasePart, DataModel, Humanoid, Model, Runtime, TweenInfoData, isScriptRunnable, setActiveRuntime } from '../classes'
+import { BasePart, DataModel, Humanoid, Model, NetRole, Runtime, TweenInfoData, isScriptRunnable, setActiveRuntime } from '../classes'
+import { NetClient, NetHost, ownerOf } from '../net/Replicator'
+import type { ClientLink, HostLink } from '../net/transport'
 import { LuauRuntime, OutputSink } from '../luau/LuauRuntime'
 import { Physics, initPhysics } from '../physics/Physics'
 import { SceneRenderer } from '../render/SceneRenderer'
@@ -31,6 +33,13 @@ export interface SessionOptions {
   pythonIndexURL?: string
   /** where SaveService keeps its slots (none: saves last only while the game runs) */
   saveBackend?: SaveBackend | null
+  /**
+   * Multiplayer (NetworkService.Enabled): host the game for others, or play in someone's game. A
+   * client's `data` is the host's snapshot from the welcome message, and `player` its Player's id there.
+   */
+  network?: { role: 'host'; link: HostLink; placeName?: string } | { role: 'client'; link: ClientLink; player: number }
+  /** a client lost its host (or was kicked) */
+  onDisconnect?: (reason: string) => void
 }
 
 export class GameSession implements Runtime, Runtime2D {
@@ -72,10 +81,20 @@ export class GameSession implements Runtime, Runtime2D {
   private respawnTimer: number | null = null
   private wrapper: HTMLDivElement
   stopped = false
+  // ---- multiplayer
+  netHost: NetHost | null = null
+  netClient: NetClient | null = null
+  /** a client: the host's instance ids -> this machine's copies (filled while loading the snapshot) */
+  private netMap = new Map<number, Instance>()
+  private nextUserId = 2
+  private remoteRespawns = new Map<Instance, number>()
+  private invokes = new Map<number, { done: boolean; ok: boolean; value: unknown }>()
+  private answers = new Map<number, (ok: boolean, value: unknown) => void>()
+  private nextRequest = 1
 
   private constructor(readonly container: HTMLElement, data: SerializedInstance, readonly opts: SessionOptions) {
     this.game = new DataModel()
-    deserialize(data, this.game)
+    deserialize(data, this.game, this.netMap)
     this.game.initServices()
     this.game.runtime = this
     setActiveRuntime(this)
@@ -102,12 +121,14 @@ export class GameSession implements Runtime, Runtime2D {
 
     this.renderer = new SceneRenderer(this.wrapper, game)
     this.physics = new Physics(game)
+    if (this.opts.network) this.physics.isRemote = (p) => this.isRemote(p)
     this.mode2d = !!game.getService('World2D').get('Enabled')
     if (this.mode2d) {
       await initPhysics2D()
       this.renderer.renderer.domElement.style.display = 'none'
       this.r2d = new Renderer2D(this.wrapper, game)
       this.phys2d = new Physics2D(game)
+      if (this.opts.network) this.phys2d.isRemote = (b) => this.isRemote(b)
       ;(game as any).runtime2d = this
     }
     // billboards sit over the game, under the ScreenGuis
@@ -140,6 +161,7 @@ export class GameSession implements Runtime, Runtime2D {
         }
         if (inst.className === 'Sound') this.soundChanged(inst, prop)
         if (inst.className === 'SaveService' && prop === 'AutoSave') this.save.autoSave = inst.get<boolean>('AutoSave') !== false
+        if (prop === 'Health' && inst instanceof Humanoid && this.netRole() === 'host') this.checkRemoteDeath(inst)
       },
     }))
 
@@ -147,20 +169,49 @@ export class GameSession implements Runtime, Runtime2D {
 
     // 0. save data, so scripts can read it straight away
     this.setupSave()
-    // 1. server scripts
+    // a player in someone else's game: this machine's player is already in the snapshot
+    const net = this.opts.network
+    if (net?.role === 'client') {
+      this.player = this.netMap.get(net.player)!
+      game.getService('Players').rawSet('LocalPlayer', this.player) // before any LocalScript starts
+    }
+    // 1. scripts (a client runs only LocalScripts; the host runs both)
     for (const d of game.getDescendants()) this.maybeRunScript(d)
     this.scripts.step(0)
     // 2. NPC humanoids already in the workspace
     for (const d of ws.getDescendants()) this.maybeControl(d)
     // 3. the local player joins
-    this.addPlayer()
+    if (net?.role === 'client') this.joinAsClient()
+    else this.addPlayer()
+    for (const d of game.getDescendants()) this.maybeRunScript(d) // the LocalScripts, now there is a LocalPlayer
+    // 4. multiplayer: start hosting, or listening to the host
+    if (net?.role === 'host') this.netHost = new NetHost(this.hostHooks(net.placeName ?? 'Game'), net.link)
+    if (net?.role === 'client') {
+      this.netClient = new NetClient({
+        game, localPlayer: () => this.player ?? null,
+        invokeHere: (r, e, a, answer) => this.invokeHere(r, e, a, answer),
+        ownershipChanged: () => this.ownershipChanged(),
+        disconnected: (reason) => this.disconnected(reason),
+      }, net.link, this.netMap)
+      this.netClient.start()
+    }
     // 4. AnimationPlayers set to Autoplay
     this.animations.autoplay(game.getDescendants().filter((d) => d.className === 'AnimationPlayer'))
 
     const loop = this.r2d ?? this.renderer
     loop.onBeforeRender = (dt) => this.frame(dt)
     loop.start()
+    if (net) {
+      // a hidden window gets no animation frames: keep the game (and everyone else's) going anyway
+      const keepAlive = window.setInterval(() => {
+        const now = performance.now()
+        if (now - this.lastFrameAt < 250) return
+        this.frame(Math.min(0.1, (now - this.lastFrameAt) / 1000))
+      }, 50)
+      this.cleanup.push(() => clearInterval(keepAlive))
+    }
   }
+  private lastFrameAt = performance.now()
 
   stop() {
     if (this.stopped) return
@@ -170,6 +221,9 @@ export class GameSession implements Runtime, Runtime2D {
     for (const c of this.cleanup) c()
     for (const c of this.controllers.values()) c.dispose()
     for (const a of this.sounds.values()) a.pause()
+    this.netHost?.dispose()
+    this.netClient?.dispose()
+    for (const t of this.remoteRespawns.values()) clearTimeout(t)
     this.scripts.destroy()
     this.luau.destroy()
     this.renderer.dispose()
@@ -190,9 +244,22 @@ export class GameSession implements Runtime, Runtime2D {
    * under Players (GUIs, characters). Storage, StarterGui etc. hold templates.
    */
   private scriptLocationOk(s: Instance) {
-    if (s.className !== 'Script') return false
+    if (s.className !== 'Script' && s.className !== 'LocalScript') return false
+    // LocalScripts start once this machine's player exists (LocalPlayer is set), as in Roblox
+    if (s.className === 'LocalScript' && !this.player) return false
+    const role = this.netRole()
+    // multiplayer: Scripts run on the host only
+    if (s.className === 'Script' && role === 'client') return false
     const g = this.game
-    return s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('World2D')) || s.isDescendantOf(g.getService('ScriptService')) || s.isDescendantOf(g.getService('Players'))
+    if (!(s.isDescendantOf(g.workspace) || s.isDescendantOf(g.getService('World2D')) || s.isDescendantOf(g.getService('ScriptService')) || s.isDescendantOf(g.getService('Players')))) return false
+    if (s.className === 'LocalScript' && role !== 'solo') {
+      // LocalScripts belong to one player: inside another player's character or Player, they don't run here
+      const owner = ownerOf(s, g)
+      if (owner && owner !== this.player) return false
+      for (let p = s.parent; p; p = p.parent) if (p.className === 'Player' && p !== this.player) return false
+      if (!this.player && s.isDescendantOf(g.getService('Players'))) return false
+    }
+    return true
   }
 
   private maybeRunScript(s: Instance) {
@@ -224,6 +291,8 @@ export class GameSession implements Runtime, Runtime2D {
     if (this.controllers.has(inst as Model) || inst.destroyed || !inst.isDescendantOf(this.game.workspace)) return
     const found = findHumanoidModel(inst)
     if (!found) return
+    // multiplayer: each machine moves only its own humanoids (the host: NPCs and its player; a player: their character)
+    if (this.isRemote(found.model)) return
     const ctl = new CharacterController(found.model, found.humanoid, this.physics, () => this.gameTime)
     this.controllers.set(found.model, ctl)
   }
@@ -271,7 +340,19 @@ export class GameSession implements Runtime, Runtime2D {
     // spawn location
     const spawns = this.game.workspace.getDescendants().filter((d) => d.className === 'SpawnLocation' && d.get('Enabled')) as BasePart[]
     const spawn = spawns.length ? spawns[Math.floor(Math.random() * spawns.length)] : null
-    const base = spawn ? spawn.cframe.position.add(new Vector3(0, spawn.size.y / 2 + 3.05, 0)) : new Vector3(0, 10, 0)
+    // somewhere on the pad, not inside another player (multiplayer: everyone spawns on the same pads)
+    const others = this.game.getService('Players').children
+      .map((p) => p.get<Model | null>('Character')).filter((c): c is Model => !!c && c !== old && !c.destroyed)
+      .map((c) => c.getPivot().position)
+    const spot = () => {
+      if (!spawn) return new Vector3(0, 10, 0)
+      const top = spawn.cframe.position.add(new Vector3(0, spawn.size.y / 2 + 3.05, 0))
+      if (!others.length) return top
+      const rx = Math.max(0, spawn.size.x / 2 - 2), rz = Math.max(0, spawn.size.z / 2 - 2)
+      return top.add(new Vector3((Math.random() * 2 - 1) * rx, 0, (Math.random() * 2 - 1) * rz))
+    }
+    let base = spot()
+    for (let i = 0; i < 12 && others.some((o) => new Vector3(o.x - base.x, 0, o.z - base.z).magnitude < 3); i++) base = spot()
     ch.pivotTo(CFrame.fromPosition(base))
     const scs = sp.findFirstChild('StarterCharacterScripts')
     if (scs) for (const s of scs.children) s.clone().setParent(ch)
@@ -284,8 +365,7 @@ export class GameSession implements Runtime, Runtime2D {
     }
     ch.setParent(this.game.workspace)
     this.maybeControl(ch)
-    const cam = this.camera()
-    cam.set('CameraSubject', hum)
+    if (player === this.player) this.camera().set('CameraSubject', hum)
     player.fire('CharacterAdded', ch)
   }
 
@@ -299,6 +379,7 @@ export class GameSession implements Runtime, Runtime2D {
 
   private frame(dt: number) {
     if (this.stopped) return
+    this.lastFrameAt = performance.now()
     this.frameDt = dt
     this.gameTime += dt
     const rs = this.game.getService('RunService')
@@ -339,6 +420,9 @@ export class GameSession implements Runtime, Runtime2D {
     this.scripts.step(this.gameTime)
     this.scripts.fireFrame(rs, 'PostSimulation', [dt])
     this.scripts.fireFrame(rs, 'Heartbeat', [dt])
+    // multiplayer: send this frame's changes (every TICK), glide what others move
+    this.netHost?.update(dt)
+    this.netClient?.update(dt)
 
     if (this.mode2d) {
       this.scripts.renderStep(dt)
@@ -409,7 +493,8 @@ export class GameSession implements Runtime, Runtime2D {
         this.deadSeen.add(ctl.humanoid)
         ctl.die()
         this.controllers.delete(model)
-        if (this.player && this.player.get('Character') === model) this.scheduleRespawn()
+        // (in someone else's game, the host brings the character back)
+        if (this.player && this.player.get('Character') === model && this.netRole() !== 'client') this.scheduleRespawn()
         // character debris cleanup
         if (this.player?.get('Character') !== model) this.addDebris(model, 8)
       }
@@ -641,9 +726,173 @@ export class GameSession implements Runtime, Runtime2D {
     const c = h.parent ? this.controllers.get(h.parent as Model) : null
     c?.jump()
   }
-  kick(_player: Instance, message: string) {
+  kick(player: Instance, message: string) {
+    if (player !== this.player && this.netHost?.kick(player, message || 'You were removed from the game.')) return
     this.opts.output('warn', `Kicked: ${message || 'You have been kicked from the game'}`)
     this.stop()
+  }
+
+  // ------------------------------------------------------------------ multiplayer
+  netRole(): NetRole { return this.opts.network?.role ?? 'solo' }
+  hostAddress() { return this.netHost?.address ?? '' }
+
+  /** Something another machine moves: another player's character, or (on a player's machine) the host's world. */
+  private isRemote(inst: Instance): boolean {
+    const role = this.netRole()
+    if (role === 'solo') return false
+    const owner = ownerOf(inst, this.game)
+    return role === 'host' ? !!owner && owner !== this.player : owner !== this.player
+  }
+
+  /** A character changed hands (joined, respawned): physics, controls, camera and scripts follow. */
+  private ownershipChanged() {
+    queueMicrotask(() => {
+      if (this.stopped) return
+      this.physics.refreshRemote()
+      const ch = this.player?.get<Instance | null>('Character')
+      if (ch && !ch.destroyed) {
+        this.maybeControl(ch)
+        if (this.netRole() === 'client') {
+          const hum = ch.findFirstChildOfClass('Humanoid')
+          if (hum) this.camera()?.set('CameraSubject', hum)
+          // LocalScripts that arrived with the character before it was known to be ours
+          for (const d of ch.getDescendants()) this.maybeRunScript(d)
+        }
+      }
+    })
+  }
+
+  private hostHooks(placeName: string) {
+    return {
+      game: this.game, placeName,
+      hostPlayer: () => this.player,
+      addPlayer: (name: string) => this.addRemotePlayer(name),
+      removePlayer: (p: Instance) => this.removeRemotePlayer(p),
+      invokeHere: (r: Instance, e: '__ServerInvoke', a: unknown[], answer: (ok: boolean, value: unknown) => void) => this.invokeHere(r, e, a, answer),
+      ownershipChanged: () => this.ownershipChanged(),
+      output: (kind: 'info' | 'warn' | 'error', msg: string) => this.opts.output(kind, msg),
+      assets: () => assets.serialize(),
+    }
+  }
+
+  /** Host: a player joined over the network. */
+  private addRemotePlayer(name: string): Instance | string {
+    const players = this.game.getService('Players')
+    const max = Math.max(1, this.game.getService('NetworkService').get<number>('MaxPlayers') ?? 8)
+    const count = players.children.filter((c) => c.className === 'Player').length
+    if (count >= max) return `The game is full (${max} players).`
+    let unique = name, n = 2
+    while (players.children.some((c) => c.className === 'Player' && c.name === unique)) unique = `${name}${n++}`
+    const p = createInstance('Player')
+    p.name = unique
+    p.rawSet('UserId', this.nextUserId++)
+    p.rawSet('DisplayName', unique)
+    createInstance('PlayerGui').setParent(p) // stays on the host: that player's GUI lives on their machine
+    p.setParent(players)
+    players.fire('PlayerAdded', p)
+    if (players.get('CharacterAutoLoads') && !this.mode2d) this.loadCharacter(p)
+    return p
+  }
+
+  private removeRemotePlayer(p: Instance) {
+    const players = this.game.getService('Players')
+    players.fire('PlayerRemoving', p)
+    const t = this.remoteRespawns.get(p)
+    if (t) { clearTimeout(t); this.remoteRespawns.delete(p) }
+    const ch = p.get<Instance | null>('Character')
+    if (ch && !ch.destroyed) ch.destroy()
+    p.destroy()
+  }
+
+  /** Host: another player's character died; bring them back like the host's own. */
+  private checkRemoteDeath(h: Humanoid) {
+    if ((h.get<number>('Health') ?? 1) > 0 || !h.parent) return
+    const owner = ownerOf(h, this.game)
+    if (!owner || owner === this.player || this.remoteRespawns.has(owner)) return
+    this.remoteRespawns.set(owner, window.setTimeout(() => {
+      this.remoteRespawns.delete(owner)
+      if (!this.stopped && !owner.destroyed && this.game.getService('Players').get('CharacterAutoLoads') && !this.mode2d) this.loadCharacter(owner)
+    }, 5000))
+  }
+
+  /** A player in someone else's game: GUI, mouse and character for the Player the host made for us. */
+  private joinAsClient() {
+    const players = this.game.getService('Players')
+    const p = this.player
+    const mouse = createInstance('Mouse'); mouse.name = '__Mouse'; mouse.setParent(p); this.mouseObj = mouse
+    createInstance('PlayerGui').setParent(p)
+    players.rawSet('LocalPlayer', p)
+    const playerGui = p.findFirstChild('PlayerGui')!
+    for (const g of this.game.getService('StarterGui').children) g.clone().setParent(playerGui)
+    this.gui.setSource(playerGui)
+    this.billboards.guiSource = playerGui
+    for (const d of p.getDescendants()) this.maybeRunScript(d)
+    this.ownershipChanged()
+  }
+
+  private disconnected(reason: string) {
+    this.opts.output('warn', reason)
+    const box = document.createElement('div')
+    Object.assign(box.style, {
+      position: 'absolute', inset: '0', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(10,12,16,0.72)', color: '#fff', font: '600 18px system-ui, sans-serif', textAlign: 'center', padding: '24px',
+    })
+    box.textContent = reason
+    this.wrapper.appendChild(box)
+    this.opts.onDisconnect?.(reason)
+  }
+
+  // ---- remotes
+  remoteFire(remote: Instance, to: 'server' | 'all' | Instance, args: unknown[]) {
+    const role = this.netRole()
+    if (to === 'server') {
+      if (role === 'client') this.netClient!.fireServer(remote, args)
+      else remote.fire('OnServerEvent', this.player, ...args)
+      return
+    }
+    if (role === 'client') throw new Error(`${to === 'all' ? 'FireAllClients' : 'FireClient'} can only be used on the host (from a Script)`)
+    if (to === 'all') {
+      this.netHost?.fireClients(remote, null, args)
+      remote.fire('OnClientEvent', ...args) // the host is playing too
+    } else if (to === this.player) remote.fire('OnClientEvent', ...args)
+    else this.netHost?.fireClients(remote, to, args)
+  }
+
+  remoteInvoke(remote: Instance, to: 'server' | Instance, args: unknown[]): number {
+    const id = this.nextRequest++
+    const r = { done: false, ok: false, value: null as unknown }
+    this.invokes.set(id, r)
+    const finish = (ok: boolean, value: unknown) => { if (!r.done) Object.assign(r, { done: true, ok, value }) }
+    const role = this.netRole()
+    if (to === 'server') {
+      if (role === 'client') this.netClient!.invokeServer(remote, args, finish)
+      else this.invokeHere(remote, '__ServerInvoke', [this.player, ...args], finish)
+    } else if (role === 'client') {
+      this.invokes.delete(id)
+      throw new Error('InvokeClient can only be used on the host (from a Script)')
+    } else if (to === this.player) this.invokeHere(remote, '__ClientInvoke', args, finish)
+    else if (this.netHost) this.netHost.invokeClient(remote, to, args, finish)
+    else finish(false, `${to.name} is not in the game`)
+    return id
+  }
+
+  remoteResult(id: number): [boolean, boolean, unknown] {
+    const r = this.invokes.get(id)
+    if (!r) return [true, false, 'Unknown request']
+    if (r.done) this.invokes.delete(id)
+    return [r.done, r.ok, r.value]
+  }
+
+  remoteRespond(id: number, ok: boolean, value: unknown) {
+    const answer = this.answers.get(id)
+    if (answer) { this.answers.delete(id); answer(ok, value) }
+  }
+
+  /** Ask this machine's OnServerInvoke / OnClientInvoke callback (whichever language set it answers). */
+  private invokeHere(remote: Instance, event: '__ServerInvoke' | '__ClientInvoke', args: unknown[], answer: (ok: boolean, value: unknown) => void) {
+    const id = this.nextRequest++
+    this.answers.set(id, answer)
+    remote.fire(event, id, ...args)
   }
   time() { return this.gameTime }
 

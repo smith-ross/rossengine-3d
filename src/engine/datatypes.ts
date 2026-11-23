@@ -233,6 +233,10 @@ export class Vector2 {
   add(o: Vector2) { return new Vector2(this.x + o.x, this.y + o.y) }
   sub(o: Vector2) { return new Vector2(this.x - o.x, this.y - o.y) }
   mul(s: number | Vector2) { return typeof s === 'number' ? new Vector2(this.x * s, this.y * s) : new Vector2(this.x * s.x, this.y * s.y) }
+  get magnitude() { return Math.hypot(this.x, this.y) }
+  get Unit() { const m = this.magnitude; return m > 0 ? new Vector2(this.x / m, this.y / m) : new Vector2(0, 0) }
+  Dot(o: Vector2) { return this.x * o.x + this.y * o.y }
+  Lerp(o: Vector2, t: number) { return new Vector2(this.x + (o.x - this.x) * t, this.y + (o.y - this.y) * t) }
   toString() { return `${fmt(this.x)}, ${fmt(this.y)}` }
 }
 

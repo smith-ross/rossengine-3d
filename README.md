@@ -52,24 +52,26 @@ src/engine/            the engine (shared by the editor's Play mode and the play
   render/              three.js scene mirror, materials, sky
   gui/GuiRenderer.ts   ScreenGui -> DOM overlay
   gui/BillboardLayer.ts BillboardGui: GUI over parts / 2D objects, placed each frame
+  net/                 multiplayer: replication (Replicator), wire format, local and TCP connections
   game/                GameSession (game loop), characters, tweens, input
   assets.ts            place asset store (imported files, embedded in the place)
 src/editor/            React editor (Explorer, Properties, Viewport, Monaco, Output, Assets, Build)
 src/player/            standalone runtime entry (player.html)
-electron/              player main process and preload (games never get Node access)
+electron/              player main process and preload (games never get Node access), TCP bridge for multiplayer
 tools/                 player packaging and the editor's build-server plugin
 ```
 
 ## Scripting
 
-Games run entirely on the player's machine, so there is no server/client split:
+Games are single-player by default and run entirely on the player's machine:
 
 - **Script** runs when it is in Workspace, World2D (for example inside a sprite), ScriptService, or under Players (for example a copy in PlayerGui or a character).
+- **LocalScript** runs in the same places. In a single-player game it is just like a Script; in a [multiplayer](#multiplayer) game it runs on each player's own machine, while Scripts run once, on the host.
 - **ModuleScript** is loaded with `require`.
 - **Storage** holds modules and templates. Scripts inside it do not run.
 - **StarterGui** is copied into the player's PlayerGui, and **StarterCharacterScripts** into each character.
 
-Roblox service names still work as aliases: `GetService("ReplicatedStorage")` returns Storage, and `ServerScriptService` maps to ScriptService. Places saved with `LocalScript`s are converted to `Script`s when opened.
+Roblox service names still work as aliases: `GetService("ReplicatedStorage")` returns Storage, and `ServerScriptService` maps to ScriptService.
 
 Supported API includes:
 
@@ -337,6 +339,58 @@ Scripts change billboards like any GUI:
 local tag = workspace.Shopkeeper.BillboardGui.TextLabel
 tag.Text = "Shop (open)"
 ```
+
+## Multiplayer
+
+Games are single-player unless you turn multiplayer on: **NetworkService → Enabled** (or **Players → Make the game multiplayer** in the toolbar). One player **hosts**: their machine runs the game for everyone. The others **join** and see the same world.
+
+**Trying it in the editor:** use **Players → Test with 2 / 3 / 4 players**. You play as Player1 (the host) in the editor, and each other player gets a window of their own. Closing the game (Stop) closes them too.
+
+**In a built game:** a multiplayer game starts with a Host / Join screen. **Host a game** shows the address others type to join (for example `192.168.1.20:47800`). **Join** connects to it, and **Play alone** is single-player. Players on the same network can join straight away. Over the internet, the host forwards the port (`NetworkService.Port`, 47800 by default) on their router. Windows may ask to let the game through its firewall the first time someone hosts.
+
+**What runs where:**
+
+| | Host | Each player |
+| --- | --- | --- |
+| `Script` | ✓ (once, for everyone) | — |
+| `LocalScript` | ✓ (for the host's own player) | ✓ (their own) |
+| Physics, NPCs, the world | ✓ | gets a copy, kept up to date ~30 times a second |
+| Their own character | | ✓ moves it; everyone else sees it move |
+
+- Changes made by the host's Scripts reach every player: new parts, colours, positions, attributes, sounds and so on.
+- Changes a player's LocalScripts make to the world stay on their machine. The exception is their own character (`player.Character` and everything in it), which everyone sees.
+- Each machine has its own camera, mouse and GUI (PlayerGui).
+- Players get Workspace, World2D, Players, Lighting, Storage, StarterGui, StarterPlayer, SoundService and the LocalScripts and modules in ScriptService. Scripts and SaveService stay on the host.
+- 3D characters load automatically for everyone, and players spawn spread out over the SpawnLocations. In 2D, give each player their own body from a Script: `player.Character = body`. Their LocalScript then moves `Players.LocalPlayer.Character`.
+
+**Talking between machines:** put a `RemoteEvent` or `RemoteFunction` in Storage (Insert → Object → Communication).
+
+```lua
+-- Script (host)
+local rs = game:GetService("ReplicatedStorage")
+rs.Coin.OnServerEvent:Connect(function(player, coin)
+	player:SetAttribute("Coins", (player:GetAttribute("Coins") or 0) + 1)
+	coin:Destroy()                       -- gone for everyone
+	rs.Coin:FireAllClients(player.Name)  -- tell everyone who got it
+end)
+rs.GetScore.OnServerInvoke = function(player) return player:GetAttribute("Coins") or 0 end
+
+-- LocalScript (each player)
+rs.Coin:FireServer(workspace.Coin)
+rs.Coin.OnClientEvent:Connect(function(name) print(name .. " got a coin") end)
+print("my score", rs.GetScore:InvokeServer())
+```
+
+| | |
+| --- | --- |
+| `RemoteEvent:FireServer(...)` | player → host: `OnServerEvent(player, ...)` |
+| `RemoteEvent:FireClient(player, ...)` / `FireAllClients(...)` | host → one player / everyone: `OnClientEvent(...)` |
+| `RemoteFunction:InvokeServer(...)` | asks the host; waits for `OnServerInvoke(player, ...)` to return |
+| `RemoteFunction:InvokeClient(player, ...)` | asks a player; waits for their `OnClientInvoke(...)` |
+| `RunService:IsServer()` / `IsClient()` | true on the host (and in single-player) / everywhere |
+| `NetworkService:IsHost()`, `IsClient()`, `IsMultiplayer()`, `GetHostAddress()` | this machine's part in the game, and the address to show others |
+
+Arguments can be numbers, strings, booleans, tables, Vector3s, CFrames, Color3s, and other datatypes. Instances can be passed too, as long as the other machine has them. In TypeScript and Python, `InvokeServer` / `InvokeClient` are awaited. The callbacks (`OnServerInvoke`…) work in any language. `Players.PlayerAdded` / `PlayerRemoving` fire on the host as players come and go. A single-player game delivers everything straight away on the same machine, so the same scripts work either way.
 
 ## Saving data
 

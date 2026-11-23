@@ -21,6 +21,8 @@ interface Body {
   controller?: RAPIER.KinematicCharacterController
   state: { floor: boolean; wall: boolean; ceiling: boolean; floorNormal: Vector2 }
   signature: string
+  /** multiplayer: moved by another machine (a rigid body that is kinematic here) */
+  remote?: boolean
 }
 
 const STEP = 1 / 60
@@ -36,6 +38,8 @@ export class Physics2D {
   private touching = new Map<string, number>()
   private disposeObserver: () => void
   frameDt = 1 / 60
+  /** multiplayer: bodies another machine controls follow the network (see Physics.isRemote) */
+  isRemote: ((body: Instance) => boolean) | null = null
 
   constructor(readonly game: DataModel) {
     this.world = new RAPIER.World(this.gravity())
@@ -92,10 +96,10 @@ export class Physics2D {
           const kind = this.kindOf(c)
           if (kind) {
             seen.add(c)
-            const sig = this.signature(c)
+            const sig = this.signature(c) + (kind === 'rigid' && this.isRemote?.(c) ? '|remote' : '')
             let b = this.bodies.get(c)
             if (!b || b.kind !== kind || b.signature !== sig) { this.removeBody(c); b = this.createBody(c, kind, sig) }
-            if (b.kind !== 'rigid') this.placeKinematic(b)
+            if (b.kind !== 'rigid' || b.remote) this.placeKinematic(b)
             else if (this.teleport.has(c)) {
               const m = worldXform(c)
               b.rb.setTranslation(this.toM({ x: m.tx, y: m.ty }), true)
@@ -121,7 +125,9 @@ export class Physics2D {
   private createBody(i: Instance, kind: Kind, signature: string): Body {
     const m = worldXform(i)
     let desc: RAPIER.RigidBodyDesc
-    if (kind === 'rigid') {
+    const remote = kind === 'rigid' && signature.endsWith('|remote')
+    if (remote) desc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    else if (kind === 'rigid') {
       desc = RAPIER.RigidBodyDesc.dynamic()
         .setGravityScale(i.get<number>('GravityScale') ?? 1)
         .setLinearDamping(i.get<number>('LinearDamping') ?? 0)
@@ -178,7 +184,7 @@ export class Physics2D {
       if (kind === 'area' || i.get('CanCollide') === false) cd.setSensor(true)
       add(cd)
     }
-    const body: Body = { inst: i, kind, rb, colliders, signature, state: { floor: false, wall: false, ceiling: false, floorNormal: new Vector2(0, -1) } }
+    const body: Body = { inst: i, kind, rb, colliders, signature, remote, state: { floor: false, wall: false, ceiling: false, floorNormal: new Vector2(0, -1) } }
     if (kind === 'character') {
       const c = this.world.createCharacterController(0.01)
       c.setUp({ x: 0, y: -1 })
@@ -225,7 +231,7 @@ export class Physics2D {
     this.writing = true
     try {
       for (const b of this.bodies.values()) {
-        if (b.kind !== 'rigid' || b.rb.isSleeping()) continue
+        if (b.kind !== 'rigid' || b.remote || b.rb.isSleeping()) continue
         const t = b.rb.translation()
         const i = b.inst
         setWorldPosition(i, new Vector2(t.x * this.ppm, t.y * this.ppm))

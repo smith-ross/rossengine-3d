@@ -1088,6 +1088,7 @@ local wrappers = {} -- id -> proxy
 local classOf = {} -- id -> class name
 local signals = {} -- id -> { name -> Signal }
 local luaProps = {} -- id -> { name -> value } (Luau-only properties like OnInvoke)
+local luaPropHooks = {} -- class -> function(self, name, value): runs after a Luau-only property is set
 local memberCache = {} -- class -> { name -> kind }
 local luaMethods = {} -- class -> { name -> fn } (Luau-implemented methods)
 local luaPropNames = {} -- class -> { name -> true }
@@ -1389,6 +1390,10 @@ local function instNewIndex(self, key, value)
 			luaProps[id] = p
 		end
 		p[key] = value
+		local hook = luaPropHooks[cls]
+		if hook then
+			hook(self, key, value)
+		end
 		return
 	elseif kind == "R" then
 		error("Unable to assign property " .. tostring(key) .. ". Property is read only", 2)
@@ -1491,6 +1496,55 @@ defineLua("BindableFunction", {
 		return cb(...)
 	end,
 })
+-- RemoteFunction: InvokeServer / InvokeClient wait for the answer; OnServerInvoke / OnClientInvoke give it.
+-- (The request travels through the engine, so a callback set in TypeScript or Python can answer too.)
+local function awaitInvoke(self, req)
+	while true do
+		local r = self:__invokePoll(req)
+		if r[1] then
+			if r[2] then
+				return r[3]
+			end
+			error(tostring(r[3]), 3)
+		end
+		task.wait()
+	end
+end
+defineLuaProps("RemoteFunction", { "OnServerInvoke", "OnClientInvoke" })
+defineLua("RemoteFunction", {
+	InvokeServer = function(self, ...)
+		return awaitInvoke(self, self:__invokeStart("server", ...))
+	end,
+	InvokeClient = function(self, player, ...)
+		return awaitInvoke(self, self:__invokeStart(player, ...))
+	end,
+})
+local invokeListening = {} -- id -> { event -> true }
+luaPropHooks.RemoteFunction = function(self, key, value)
+	local event = (key == "OnServerInvoke" and "__ServerInvoke") or (key == "OnClientInvoke" and "__ClientInvoke") or nil
+	if not event or value == nil then
+		return
+	end
+	local id = idOf[self]
+	invokeListening[id] = invokeListening[id] or {}
+	if invokeListening[id][event] then
+		return
+	end
+	invokeListening[id][event] = true
+	self[event]:Connect(function(req, ...)
+		local cb = luaProps[id] and luaProps[id][key]
+		if type(cb) ~= "function" then
+			return -- not set here: another language may answer
+		end
+		local r = tpack(pcall(cb, ...))
+		if r[1] then
+			self:__invokeRespond(req, true, r[2])
+		else
+			self:__invokeRespond(req, false, tostring(r[2]))
+		end
+	end)
+end
+
 -- RunService:BindToRenderStep
 local renderBindings = {}
 defineLua("RunService", {

@@ -334,7 +334,30 @@ class EditorStore {
   // ------------------------------------------------------------------ play
   playContainer: HTMLElement | null = null
 
-  async play() {
+  /**
+   * Test multiplayer: this window hosts the game, and `players - 1` more windows join it as other
+   * players (a local room on this machine, like a built game's Host / Join over the network).
+   */
+  async playMultiplayer(players: number) {
+    if (this.playing || this.starting || !this.playContainer) return
+    const { hostLocal } = await import('../engine/net/transport')
+    const room = Math.random().toString(36).slice(2, 10)
+    const link = hostLocal(room)
+    if (!this.game.getService('NetworkService').get('Enabled')) {
+      this.log('info', 'Testing multiplayer. To let players host and join the built game, turn on NetworkService.Enabled.')
+    }
+    await this.play({ role: 'host', link, placeName: this.placeName })
+    if (!this.playing) { link.close(); return }
+    const { desktop } = await import('./desktop')
+    for (let i = 2; i <= players; i++) {
+      const hash = `#ross-client=${room}&name=Player${i}`
+      if (desktop?.openClient) desktop.openClient(hash, i - 1)
+      else window.open(`${location.origin}${location.pathname}${hash}`, `ross-client-${room}-${i}`, `popup,width=960,height=600,left=${40 + (i - 2) * 60},top=${60 + (i - 2) * 60}`)
+    }
+    this.log('system', `Multiplayer test: you are Player1 (the host); ${players - 1} more player window${players > 2 ? 's' : ''} opened.`)
+  }
+
+  async play(network?: { role: 'host'; link: import('../engine/net/transport').HostLink; placeName?: string }) {
     if (this.playing || this.starting || !this.playContainer) return
     this.starting = true
     this.activeTab = null
@@ -345,6 +368,7 @@ class EditorStore {
       const session = await GameSession.start(this.playContainer, this.snapshot(), {
         output: (kind, message, source) => this.log(kind, message, source),
         saveBackend: this.saveBackend(),
+        network,
       })
       this.session = session
       this.playing = true

@@ -3,6 +3,7 @@
 const { app, BrowserWindow, Menu, ipcMain, protocol, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const { registerNetIpc } = require('./net-bridge.cjs')
 
 const RUNTIME_DIR = path.join(__dirname, 'runtime')
 const MIME = {
@@ -66,7 +67,8 @@ function createWindow() {
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
-      backgroundThrottling: !process.env.ROSS_SMOKE_TEST,
+      // keep running when not in front (a multiplayer host must keep the game going for everyone)
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -74,7 +76,7 @@ function createWindow() {
     },
   })
   // smoke tests run fully hidden (no window, no focus stealing)
-  if (!process.env.ROSS_SMOKE_TEST) win.once('ready-to-show', () => win.show())
+  if (!process.env.ROSS_SMOKE_TEST && !process.env.ROSS_SMOKE_SCRIPT) win.once('ready-to-show', () => win.show())
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
     if (input.key === 'F11') { win.setFullScreen(!win.isFullScreen()); event.preventDefault() }
@@ -88,6 +90,19 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('app://')) e.preventDefault() })
   win.loadURL('app://runtime/player.html')
 
+  // Automated test: ROSS_SMOKE_SCRIPT=file.js runs that script in the page (hidden) and prints its result.
+  if (process.env.ROSS_SMOKE_SCRIPT) {
+    const code = fs.readFileSync(process.env.ROSS_SMOKE_SCRIPT, 'utf8')
+    win.webContents.on('console-message', (e) => { if (e.level === 'error' || e.level === 'warning') process.stdout.write(`[game:${e.level}] ${e.message}
+`) })
+    win.webContents.once('did-finish-load', () => setTimeout(async () => {
+      try { process.stdout.write(`[smoke] ${JSON.stringify(await win.webContents.executeJavaScript(code, true), null, 1)}
+`) }
+      catch (err) { process.stdout.write(`[smoke] failed: ${err && err.stack || err}
+`) }
+      app.quit()
+    }, 1500))
+  }
   // Automated smoke test: ROSS_SMOKE_TEST=out.png runs the game briefly, saves a screenshot,
   // prints the game's console output and exits.
   const smoke = process.env.ROSS_SMOKE_TEST
@@ -141,6 +156,7 @@ app.whenReady().then(() => {
   ipcMain.on('ross:save-list', (e) => reply(e, () => (fs.existsSync(savesDir()) ? fs.readdirSync(savesDir()).filter((n) => n.endsWith('.json')).map((n) => n.slice(0, -5)).sort() : [])))
   ipcMain.on('ross:save-delete', (e, slot) => reply(e, () => { const f = slotFile(slot); if (fs.existsSync(f)) fs.rmSync(f); return true }))
 
+  registerNetIpc(ipcMain)
   ipcMain.handle('ross:load-game', () => {
     const g = readGame()
     return g ? g.text : null

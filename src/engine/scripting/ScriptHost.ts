@@ -239,6 +239,19 @@ export class ScriptHost {
         return f(...args)
       }
     }
+    if (inst.className === 'RemoteFunction' && (key === 'InvokeServer' || key === 'InvokeClient')) {
+      // wait (asynchronously) for the answer: the host's OnServerInvoke / the player's OnClientInvoke
+      return async (...args: unknown[]) => {
+        const call = (m: string, ...a: unknown[]) => inst.classInfo.methods.get(m)!(inst, ...a)
+        const engineArgs = args.map((a) => host.fromApi(a))
+        const req = key === 'InvokeServer' ? call('__invokeStart', 'server', ...engineArgs) : call('__invokeStart', ...engineArgs)
+        for (;;) {
+          const [done, ok, value] = call('__invokePoll', req) as [boolean, boolean, unknown]
+          if (done) { if (ok) return host.toApi(value); throw new Error(String(value)) }
+          await host.wait(0)
+        }
+      }
+    }
     if (inst.className === 'RunService' && key === 'BindToRenderStep') {
       return (name: string, priority: number, fn: Fn) => {
         host.renderBindings.set(String(name), { priority: Number(priority) || 0, fn: host.keepCallback(fn), owner: host.currentScript })
@@ -286,7 +299,33 @@ export class ScriptHost {
       m.set(key, typeof value === 'function' ? this.keepCallback(value as Fn) : value)
       return
     }
+    if ((key === 'OnServerInvoke' || key === 'OnClientInvoke') && inst.className === 'RemoteFunction') {
+      let m = this.jsProps.get(inst)
+      if (!m) { m = new Map(); this.jsProps.set(inst, m) }
+      m.set(key, typeof value === 'function' ? this.keepCallback(value as Fn) : value)
+      this.listenForInvokes(inst, key)
+      return
+    }
     throw new Error(`${key} is not a valid member of ${inst.className} "${inst.getFullName()}"`)
+  }
+
+  /** RemoteFunction requests reach this callback (once per remote and side, when it is first set). */
+  private invokeListening = new WeakMap<Instance, Set<string>>()
+  private listenForInvokes(inst: Instance, key: 'OnServerInvoke' | 'OnClientInvoke') {
+    let set = this.invokeListening.get(inst)
+    if (!set) { set = new Set(); this.invokeListening.set(inst, set) }
+    if (set.has(key)) return
+    set.add(key)
+    const respond = inst.classInfo.methods.get('__invokeRespond')!
+    this.signal(inst, key === 'OnServerInvoke' ? '__ServerInvoke' : '__ClientInvoke').Connect(async (req: unknown, ...args: unknown[]) => {
+      const cb = this.jsProps.get(inst)?.get(key)
+      if (typeof cb !== 'function') return // not set here: another language may answer
+      try {
+        respond(inst, req, true, this.fromApi(await (cb as Fn)(...args)))
+      } catch (e) {
+        respond(inst, req, false, (e as Error)?.message ?? String(e))
+      }
+    })
   }
 
   private hasMember(inst: Instance, key: string) {

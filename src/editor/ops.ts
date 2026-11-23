@@ -9,11 +9,11 @@ import { CHARACTER_CONTROLLER } from '../engine/scripting/characterController'
 import { compileRecipe, defaultRecipe } from '../engine/shaderRecipe'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
-export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
+export function insertScript(cls: 'Script' | 'LocalScript' | 'ModuleScript', lang: ScriptLanguage, parent?: Instance): Instance {
   return editor.mutate(() => {
     const s = createInstance(cls)
     s.set('Language', enumItem('ScriptLanguage', lang))
-    s.set('Source', DEFAULT_SOURCE[lang][cls === 'Script' ? 'script' : 'module'])
+    s.set('Source', DEFAULT_SOURCE[lang][cls === 'ModuleScript' ? 'module' : 'script'])
     s.setParent(parent ?? defaultParentFor(cls))
     editor.selection = [s]
     editor.openScript(s)
@@ -87,7 +87,7 @@ export function defaultParentFor(className: string): Instance {
   }
   if (className === 'TileTerrain') return sel?.className === 'TileMap' ? sel : sel?.parent?.className === 'TileMap' ? sel.parent : g.getService('World2D')
   if (className === 'SpriteAnimation') return sel?.className === 'AnimatedSprite2D' ? sel : (sel?.parent?.className === 'AnimatedSprite2D' ? sel.parent : g.getService('World2D'))
-  if (className === 'Script') return g.getService('ScriptService')
+  if (className === 'Script' || className === 'LocalScript') return g.getService('ScriptService')
   if (className === 'ModuleScript') return g.getService('Storage')
   if (className === 'ScreenGui') return g.getService('StarterGui')
   return g.workspace

@@ -1,7 +1,9 @@
-import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { App } from './App'
 
-import { editor } from './store'
-
-void editor.init().then(() => createRoot(document.getElementById('root')!).render(<App />))
+if (location.hash.startsWith('#ross-client=')) {
+  // a test player window for "Test multiplayer" (no editor)
+  void import('./clientWindow').then((m) => m.runClientWindow())
+} else {
+  void Promise.all([import('react-dom/client'), import('./App'), import('./store')]).then(([{ createRoot }, { App }, { editor }]) =>
+    editor.init().then(() => createRoot(document.getElementById('root')!).render(<App />)))
+}

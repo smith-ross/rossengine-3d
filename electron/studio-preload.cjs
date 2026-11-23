@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('rossStudio', {
   runGame: (p) => ipcRenderer.invoke('studio:runGame', p),
   setDirty: (dirty) => ipcRenderer.send('studio:dirty', dirty),
   closeNow: () => ipcRenderer.send('studio:close'),
+  // "Test multiplayer": another player window running this app as a test client
+  openClient: (hash, index) => ipcRenderer.send('studio:open-client', hash, index),
   onMenu: (callback) => {
     const listener = (_e, id) => callback(id)
     ipcRenderer.on('studio:menu', listener)

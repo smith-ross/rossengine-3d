@@ -251,12 +251,14 @@ const LUAU_ONLY: Record<string, string[]> = {
   Instance: ['WaitForChild', 'GetPropertyChangedSignal', 'GetAttributeChangedSignal'],
   RunService: ['BindToRenderStep', 'UnbindFromRenderStep'],
   BindableFunction: ['Invoke'],
+  RemoteFunction: ['InvokeServer', 'InvokeClient'],
   ContextActionService: ['BindAction', 'UnbindAction'],
 }
 const JS_ONLY: Record<string, string[]> = {
   Instance: ['WaitForChild', 'GetPropertyChangedSignal', 'GetAttributeChangedSignal'],
   RunService: ['BindToRenderStep', 'UnbindFromRenderStep'],
   BindableFunction: ['Invoke'],
+  RemoteFunction: ['InvokeServer', 'InvokeClient'],
 }
 
 export function membersOf(t: Target, lang: ScriptLanguage): Member[] {
@@ -279,9 +281,9 @@ export function membersOf(t: Target, lang: ScriptLanguage): Member[] {
   add({ name: 'Name', kind: 'property', detail: 'string' })
   add({ name: 'ClassName', kind: 'property', detail: 'string' })
   for (const [name, def] of info.props) if (name !== 'Tags') add({ name, kind: 'property', detail: def.type.startsWith('Enum.') ? def.type.replace('.', '') : def.type })
-  for (const e of info.events) add({ name: e, kind: 'event', detail: 'RBXScriptSignal' })
+  for (const e of info.events) if (!e.startsWith('__')) add({ name: e, kind: 'event', detail: 'RBXScriptSignal' })
   const extra = lang === 'Luau' ? LUAU_ONLY : JS_ONLY
-  const methods = new Set(info.methods.keys())
+  const methods = new Set([...info.methods.keys()].filter((m) => !m.startsWith('__')))
   for (let c: typeof info | undefined = info; c; c = c.superclass) for (const m of extra[c.name] ?? []) methods.add(m)
   for (const m of methods) add({ name: m, kind: 'method', detail: 'method', colon: lang === 'Luau' })
   return out

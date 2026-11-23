@@ -51,6 +51,7 @@ const token = (p) => {
 let win = null
 let dirty = false
 let allowClose = false
+const testClients = new Set() // "Test multiplayer" player windows
 let altClicked = false // Alt is held for a click (see before-input-event)
 
 function createWindow() {
@@ -97,6 +98,7 @@ function createWindow() {
     if (choice === 0) win.webContents.send('studio:menu', 'save-and-close')
     if (choice === 1) { allowClose = true; win.close() }
   })
+  win.on('closed', () => { for (const w of testClients) w.destroy() })
   win.loadURL(DEV_URL || 'app://studio/index.html')
   if (process.env.ROSS_SMOKE_SCRIPT) runSmokeTest()
 }
@@ -222,6 +224,32 @@ function registerIpc() {
   })
   ipcMain.on('studio:alt-click', () => { altClicked = true })
   ipcMain.on('studio:dirty', (_e, d) => { dirty = !!d })
+  // "Test multiplayer": a test player window (the same app, showing just the game). Only test-client
+  // addresses are accepted; it closes itself when the editor stops the game.
+  ipcMain.on('studio:open-client', (_e, hash, index) => {
+    if (typeof hash !== 'string' || !/^#ross-client=[\w]+&name=[\w]+$/.test(hash)) return
+    const n = Number(index) || 1
+    const w = new BrowserWindow({
+      width: 960, height: 600, x: 80 + n * 40, y: 80 + n * 40,
+      title: 'RossEngine test player',
+      backgroundColor: '#000000',
+      autoHideMenuBar: true,
+      show: !process.env.ROSS_SMOKE_SCRIPT,
+      webPreferences: {
+        backgroundThrottling: false,
+        preload: path.join(__dirname, 'studio-preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+    w.setMenuBarVisibility(false)
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    w.webContents.on('will-navigate', (e) => e.preventDefault())
+    testClients.add(w)
+    w.on('closed', () => testClients.delete(w))
+    w.loadURL((DEV_URL || 'app://studio/index.html') + hash)
+  })
   ipcMain.on('studio:close', () => { allowClose = true; win && win.close() })
 }
 

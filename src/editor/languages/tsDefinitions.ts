@@ -69,14 +69,28 @@ const METHOD_SIGS: Record<string, string> = {
   'Sound.Pause': '(): void',
   'Sound.Resume': '(): void',
   'BindableEvent.Fire': '(...args: any[]): void',
+  'RemoteEvent.FireServer': '(...args: any[]): void',
+  'RemoteEvent.FireClient': '(player: Player, ...args: any[]): void',
+  'RemoteEvent.FireAllClients': '(...args: any[]): void',
+  'RunService.IsServer': '(): boolean',
+  'RunService.IsClient': '(): boolean',
+  'NetworkService.IsHost': '(): boolean',
+  'NetworkService.IsClient': '(): boolean',
+  'NetworkService.IsMultiplayer': '(): boolean',
+  'NetworkService.GetHostAddress': '(): string',
 }
 
 const JS_METHODS: Record<string, string[]> = {
   Instance: ['WaitForChild', 'GetPropertyChangedSignal', 'GetAttributeChangedSignal'],
   BindableFunction: ['Invoke'],
+  RemoteFunction: ['InvokeServer', 'InvokeClient'],
   RunService: ['BindToRenderStep', 'UnbindFromRenderStep'],
 }
-const EXTRA_SIGS: Record<string, string> = { 'BindableFunction.Invoke': '(...args: any[]): any' }
+const EXTRA_SIGS: Record<string, string> = {
+  'BindableFunction.Invoke': '(...args: any[]): any',
+  'RemoteFunction.InvokeServer': '(...args: any[]): Promise<any>',
+  'RemoteFunction.InvokeClient': '(player: Player, ...args: any[]): Promise<any>',
+}
 
 const EVENT_ARGS: Record<string, string> = {
   Touched: '[hit: BasePart]', TouchEnded: '[hit: BasePart]', ChildAdded: '[child: Instance]', ChildRemoved: '[child: Instance]',
@@ -232,13 +246,17 @@ export function generateTsDefinitions(): string {
       const type = PROP_TYPES[`${c.name}.${name}`] ?? tsType(def.type, name)
       out.push(`  ${def.readonly ? 'readonly ' : ''}${name}: ${type}`)
     }
-    for (const e of c.ownEvents) out.push(`  readonly ${e}: RBXScriptSignal<${EVENT_ARGS[e] ?? 'any[]'}>`)
-    const methods = new Set([...Object.keys(c.ownMethods), ...(JS_METHODS[c.name] ?? [])])
+    for (const e of c.ownEvents) if (!e.startsWith('__')) out.push(`  readonly ${e}: RBXScriptSignal<${EVENT_ARGS[e] ?? 'any[]'}>`)
+    const methods = new Set([...Object.keys(c.ownMethods).filter((m) => !m.startsWith('__')), ...(JS_METHODS[c.name] ?? [])])
     for (const m of methods) {
       const sig = METHOD_SIGS[`${c.name}.${m}`] ?? EXTRA_SIGS[`${c.name}.${m}`] ?? '(...args: any[]): any'
       out.push(`  ${m}${sig}`)
     }
     if (c.name === 'BindableFunction') out.push('  OnInvoke: ((...args: any[]) => any) | undefined')
+    if (c.name === 'RemoteFunction') {
+      out.push('  OnServerInvoke: ((player: Player, ...args: any[]) => any) | undefined')
+      out.push('  OnClientInvoke: ((...args: any[]) => any) | undefined')
+    }
     if (c.name === 'Player') out.push('  readonly PlayerGui: PlayerGui')
     out.push('}')
   }

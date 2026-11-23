@@ -52,6 +52,12 @@ export class Physics {
   private chars = new Map<BasePart, CharBody>()
   /** the set of parts riding on character bodies may have changed */
   private followersDirty = false
+  /**
+   * Multiplayer: parts another machine controls (the host's world on a player's machine, another
+   * player's character on the host). They follow the network instead of being simulated here.
+   */
+  isRemote: ((part: BasePart) => boolean) | null = null
+  private remote = new Set<BasePart>()
 
   constructor(readonly game: DataModel) {
     const g = game.workspace.get<number>('Gravity')
@@ -93,6 +99,12 @@ export class Physics {
       switch (prop) {
         case 'CFrame': {
           if (b.role) return // driven by the character controller
+          if (this.remote.has(inst)) {
+            const cf = inst.cframe
+            b.rb.setNextKinematicTranslation({ x: cf.x, y: cf.y, z: cf.z })
+            b.rb.setNextKinematicRotation(cf.toQuaternion())
+            return
+          }
           if (this.chars.has(inst)) {
             // a script turned or teleported a CharacterBody3D: its riders come along
             const cf = inst.cframe
@@ -135,6 +147,11 @@ export class Physics {
     }
   }
 
+  /** Who controls which parts changed (a character was handed to a player, or respawned): rebuild bodies. */
+  refreshRemote() {
+    for (const p of this.bodies.keys()) this.dirty.add(p)
+  }
+
   /** Mark a part as driven by a character controller. */
   setRole(part: BasePart, role: CharacterRole | null) {
     if (role) this.roles.set(part, role)
@@ -156,6 +173,7 @@ export class Physics {
     this.byCollider.delete(b.collider.handle)
     this.world.removeRigidBody(b.rb)
     this.bodies.delete(part)
+    this.remote.delete(part)
     const c = this.chars.get(part)
     if (c && !rebuilding) {
       // the body itself is gone (not just being rebuilt): its riders go back to normal physics
@@ -173,11 +191,14 @@ export class Physics {
     const anchored = part.get<boolean>('Anchored')
     let desc: RAPIER.RigidBodyDesc
     const character = isCharacterBody(part)
-    if (role || character) desc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    const remote = !role && !anchored && !!this.isRemote?.(part)
+    if (remote) this.remote.add(part)
+    else this.remote.delete(part)
+    if (role || character || remote) desc = RAPIER.RigidBodyDesc.kinematicPositionBased()
     else if (anchored) desc = RAPIER.RigidBodyDesc.fixed()
     else desc = RAPIER.RigidBodyDesc.dynamic().setCanSleep(true)
     desc.setTranslation(cf.x, cf.y, cf.z).setRotation(q)
-    if (!anchored && !role && !character) {
+    if (!anchored && !role && !character && !remote) {
       const v = part.get<Vector3>('AssemblyLinearVelocity')
       const w = part.get<Vector3>('AssemblyAngularVelocity')
       desc.setLinvel(v.x, v.y, v.z).setAngvel({ x: w.x, y: w.y, z: w.z })

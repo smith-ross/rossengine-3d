@@ -12,6 +12,8 @@ export interface StudioBridge {
   setDirty(dirty: boolean): void
   closeNow(): void
   onMenu(cb: (id: string) => void): () => void
+  /** "Test multiplayer": a player window showing this app at `hash` (a test client) */
+  openClient(hash: string, index: number): void
 }
 
 export const desktop: StudioBridge | undefined = (globalThis as any).rossStudio

@@ -89,6 +89,13 @@ const SIGS: Record<string, string> = {
   'Sound.Resume': '(self): ()',
   'BindableEvent.Fire': '(self, ...: any): ()',
   'BindableFunction.Invoke': '(self, ...: any): ...any',
+  'RemoteFunction.InvokeServer': '(self, ...: any): any',
+  'RemoteFunction.InvokeClient': '(self, player: Player, ...: any): any',
+  'RemoteEvent.FireServer': '(self, ...: any): ()',
+  'RemoteEvent.FireClient': '(self, player: Player, ...: any): ()',
+  'RemoteEvent.FireAllClients': '(self, ...: any): ()',
+  'RunService.IsServer': '(self): boolean',
+  'RunService.IsClient': '(self): boolean',
   'DataModel.IsLoaded': '(self): boolean',
 }
 
@@ -97,11 +104,13 @@ const LUA_METHODS: Record<string, string[]> = {
   Instance: ['WaitForChild', 'GetPropertyChangedSignal', 'GetAttributeChangedSignal'],
   BindableEvent: ['Fire'],
   BindableFunction: ['Invoke'],
+  RemoteFunction: ['InvokeServer', 'InvokeClient'],
   RunService: ['BindToRenderStep', 'UnbindFromRenderStep'],
   ContextActionService: ['BindAction', 'UnbindAction'],
 }
 const LUA_PROPS: Record<string, string[]> = {
   BindableFunction: ['OnInvoke: ((...any) -> ...any)?'],
+  RemoteFunction: ['OnServerInvoke: ((Player, ...any) -> ...any)?', 'OnClientInvoke: ((...any) -> ...any)?'],
 }
 
 /** More precise types for some properties and well-known children. */
@@ -400,13 +409,13 @@ export function generateDefinitions(): string {
     const members = new Map<string, string>()
     for (const [name, def] of Object.entries(c.ownProps)) members.set(name, luauType(def.type))
     for (const p of LUA_PROPS[c.name] ?? []) { const i = p.indexOf(':'); members.set(p.slice(0, i), p.slice(i + 1).trim()) }
-    for (const e of c.ownEvents) members.set(e, 'RBXScriptSignal')
+    for (const e of c.ownEvents) if (!e.startsWith('__')) members.set(e, 'RBXScriptSignal')
     for (const [k, v] of Object.entries(PROP_OVERRIDES)) {
       const [cls, name] = k.split('.')
       if (cls === c.name) members.set(name, v)
     }
     for (const [name, type] of members) out.push(`    ${name}: ${type}`)
-    const methods = new Set([...Object.keys(c.ownMethods), ...(LUA_METHODS[c.name] ?? [])])
+    const methods = new Set([...Object.keys(c.ownMethods).filter((m) => !m.startsWith('__')), ...(LUA_METHODS[c.name] ?? [])])
     for (const m of methods) {
       if (c.name === 'DataModel' && (m === 'GetService' || m === 'FindService')) continue
       out.push(`    function ${m}${SIGS[`${c.name}.${m}`] ?? '(self, ...: any): ...any'}`)

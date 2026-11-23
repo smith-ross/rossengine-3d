@@ -350,7 +350,7 @@ export function serialize(root: Instance, includeRoot = true): SerializedInstanc
 /** Build instances from serialized data. If `into` is given, the root's props/children are applied to it. */
 /** Renamed/merged classes, so places saved by older versions (or Roblox-style names) still load. */
 const CLASS_ALIASES: Record<string, string> = {
-  LocalScript: 'Script',
+  // (LocalScript is a class of its own now: in single-player games it runs just like a Script)
   ServerScriptService: 'ScriptService',
   ReplicatedStorage: 'Storage',
   ServerStorage: 'Storage',

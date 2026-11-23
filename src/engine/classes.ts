@@ -39,7 +39,20 @@ export interface Runtime {
   saveAttributeSet(key: string, value: unknown): void
   kick(player: Instance, message: string): void
   time(): number
+  /** multiplayer: this game's part in it (see engine/net) */
+  netRole(): NetRole
+  /** RemoteEvent: send to the host ('server'), every client ('all') or one player */
+  remoteFire(remote: Instance, to: 'server' | 'all' | Instance, args: unknown[]): void
+  /** RemoteFunction: start a call; poll it with remoteResult until it has finished */
+  remoteInvoke(remote: Instance, to: 'server' | Instance, args: unknown[]): number
+  remoteResult(id: number): [boolean, boolean, unknown] // [finished, ok, value or error]
+  remoteRespond(id: number, ok: boolean, value: unknown): void
+  /** the address other players type to join this host ('' when not hosting) */
+  hostAddress(): string
 }
+
+/** 'solo': single player (multiplayer off, or playing alone); 'host': runs the game for everyone; 'client': joined a host. */
+export type NetRole = 'solo' | 'host' | 'client'
 
 export interface TweenInfoData {
   time: number; style: string; direction: string; repeatCount: number; reverses: boolean; delay: number
@@ -132,10 +145,11 @@ function removeTag(i: Instance, tag: string) {
 }
 
 // ---- DataModel ---------------------------------------------------------------
-export const SERVICE_ORDER = ['Workspace', 'World2D', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService', 'SaveService']
+export const SERVICE_ORDER = ['Workspace', 'World2D', 'Players', 'Lighting', 'ScriptService', 'Storage', 'StarterGui', 'StarterPlayer', 'SoundService', 'SaveService', 'NetworkService']
 /**
- * RossEngine games run entirely on the player's machine, so there is no server/client split:
- * one Script class, scripts run in ScriptService, and Storage holds modules and templates.
+ * RossEngine games are single-player by default and run on the player's machine (multiplayer, when
+ * NetworkService is enabled, has one player host: see engine/net). Scripts live in ScriptService:
+ * Scripts and LocalScripts run from there, and Storage holds modules and templates.
  * Roblox names are accepted as aliases so familiar code (and older places) keep working.
  */
 export const SERVICE_ALIASES: Record<string, string> = {
@@ -608,6 +622,15 @@ defineClass(Script, {
   name: 'Script', superclass: 'BaseScript', category: 'Scripts',
   props: { Source: { type: 'string', hidden: true, default: () => 'print("Hello world!")\n' } },
 })
+/**
+ * Runs on each player's own machine. In a single-player game it is just like a Script; in multiplayer,
+ * Scripts run once on the host (for everyone) and LocalScripts run for each player (input, camera, GUI).
+ */
+export class LocalScript extends BaseScript {}
+defineClass(LocalScript, {
+  name: 'LocalScript', superclass: 'BaseScript', category: 'Scripts',
+  props: { Source: { type: 'string', hidden: true, default: () => 'print("Hello from " .. game.Players.LocalPlayer.Name)\n' } },
+})
 export class ModuleScript extends LuaSourceContainer {}
 defineClass(ModuleScript, {
   name: 'ModuleScript', superclass: 'LuaSourceContainer', category: 'Scripts',
@@ -644,6 +667,42 @@ for (const [name, events] of [
   })
 }
 
+// ---- Multiplayer: remotes ------------------------------------------------------
+const remoteTarget = (who: unknown, method: string): Instance => {
+  if (!(who instanceof Instance) || who.className !== 'Player') throw new Error(`${method}: argument 1 must be a Player`)
+  return who
+}
+/** Messages between the host and the players' machines (in a single-player game they arrive straight away). */
+class RemoteEvent extends Instance {}
+defineClass(RemoteEvent, {
+  name: 'RemoteEvent', superclass: 'Instance', category: 'Communication',
+  methods: {
+    /** client -> host: the host's OnServerEvent gets (player, ...) */
+    FireServer: (self: Instance, ...args: unknown[]) => rt(self).remoteFire(self, 'server', args),
+    /** host -> one player: their OnClientEvent gets (...) */
+    FireClient: (self: Instance, player: unknown, ...args: unknown[]) => rt(self).remoteFire(self, remoteTarget(player, 'FireClient'), args),
+    /** host -> every player */
+    FireAllClients: (self: Instance, ...args: unknown[]) => rt(self).remoteFire(self, 'all', args),
+  },
+  events: ['OnServerEvent', 'OnClientEvent'],
+})
+/**
+ * A question with an answer: InvokeServer waits for the host's OnServerInvoke callback to return.
+ * The waiting and the callbacks live in each language's runtime; these methods are their plumbing.
+ */
+class RemoteFunction extends Instance {}
+defineClass(RemoteFunction, {
+  name: 'RemoteFunction', superclass: 'Instance', category: 'Communication',
+  methods: {
+    __invokeStart: (self: Instance, to: unknown, ...args: unknown[]) =>
+      rt(self).remoteInvoke(self, to === 'server' ? 'server' : remoteTarget(to, 'InvokeClient'), args),
+    __invokePoll: (self: Instance, id: unknown) => rt(self).remoteResult(Number(id)),
+    __invokeRespond: (self: Instance, id: unknown, ok: unknown, value: unknown) => rt(self).remoteRespond(Number(id), !!ok, value),
+  },
+  // fired with (requestId, player, ...args) / (requestId, ...args) for whichever language set the callback
+  events: ['__ServerInvoke', '__ClientInvoke'],
+})
+
 class ClickDetector extends Instance {}
 defineClass(ClickDetector, {
   name: 'ClickDetector', superclass: 'Instance', category: 'Interaction',
@@ -654,7 +713,12 @@ defineClass(ClickDetector, {
 // ---- Players / characters ----------------------------------------------------
 service('Players', {
   LocalPlayer: { type: 'Instance', readonly: true, noSave: true },
-  MaxPlayers: { type: 'int', default: () => 1 },
+  // kept for older scripts and places: the real setting is NetworkService.MaxPlayers
+  MaxPlayers: {
+    type: 'int', hidden: true, noSave: true,
+    get: (p: Instance) => (p.dataModel as DataModel | null)?.getService('NetworkService').get<number>('MaxPlayers') ?? 8,
+    set: (p: Instance, v: number) => (p.dataModel as DataModel | null)?.getService('NetworkService').set('MaxPlayers', v),
+  },
   CharacterAutoLoads: { type: 'bool', default: () => true },
 }, {
   GetPlayers: (self: Instance) => self.children.filter((c) => c.className === 'Player'),
@@ -807,7 +871,23 @@ for (const name of ['StarterCharacterScripts']) {
 service('RunService', {}, {
   IsStudio: () => false, IsRunning: () => true,
   IsRunMode: () => false, IsEdit: () => false,
+  /** true on the host, and in single-player games */
+  IsServer: (self: Instance) => rt(self).netRole() !== 'client',
+  /** true wherever a player is playing (every machine, the host included) */
+  IsClient: () => true,
 }, ['Heartbeat', 'RenderStepped', 'Stepped', 'PreSimulation', 'PostSimulation'])
+/** Multiplayer settings. Off by default: a game is single-player unless Enabled is turned on. */
+service('NetworkService', {
+  Enabled: { type: 'bool', category: 'Multiplayer' },
+  MaxPlayers: { type: 'int', default: () => 8, category: 'Multiplayer' },
+  Port: { type: 'int', default: () => 47800, category: 'Multiplayer' },
+}, {
+  IsHost: (self: Instance) => rt(self).netRole() === 'host',
+  IsClient: (self: Instance) => rt(self).netRole() === 'client',
+  IsMultiplayer: (self: Instance) => rt(self).netRole() !== 'solo',
+  /** while hosting: the address other players join with (e.g. "192.168.1.20:47800") */
+  GetHostAddress: (self: Instance) => rt(self).hostAddress(),
+})
 service('UserInputService', {
   MouseEnabled: { type: 'bool', default: () => true, readonly: true },
   KeyboardEnabled: { type: 'bool', default: () => true, readonly: true },

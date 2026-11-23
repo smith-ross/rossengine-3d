@@ -17,3 +17,17 @@ contextBridge.exposeInMainWorld('rossPlayer', {
     remove: (slot) => { call('ross:save-delete', slot) },
   },
 })
+
+// Multiplayer over the network (TCP, in the main process): host a game or join one by address.
+contextBridge.exposeInMainWorld('rossNet', {
+  host: (port) => ipcRenderer.invoke('ross-net:host', port),
+  join: (host, port) => ipcRenderer.invoke('ross-net:join', host, port),
+  send: (peer, line) => ipcRenderer.send('ross-net:send', peer, line),
+  drop: (peer) => ipcRenderer.send('ross-net:drop', peer),
+  close: () => ipcRenderer.invoke('ross-net:close'),
+  onEvent: (callback) => {
+    const listener = (_e, ev) => callback(ev)
+    ipcRenderer.on('ross-net:event', listener)
+    return () => ipcRenderer.removeListener('ross-net:event', listener)
+  },
+})

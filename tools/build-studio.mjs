@@ -34,7 +34,7 @@ await build({ configFile: path.join(ROOT, 'vite.config.ts'), logLevel: 'warn' })
 console.log('Assembling RossEngine Studio…')
 fs.rmSync(APP, { recursive: true, force: true })
 fs.mkdirSync(APP, { recursive: true })
-for (const f of ['studio-main.cjs', 'studio-preload.cjs', 'export-game.cjs']) fs.copyFileSync(path.join(ROOT, 'electron', f), path.join(APP, f))
+for (const f of ['studio-main.cjs', 'studio-preload.cjs', 'export-game.cjs', 'net-bridge.cjs']) fs.copyFileSync(path.join(ROOT, 'electron', f), path.join(APP, f))
 fs.cpSync(path.join(ROOT, 'dist'), path.join(APP, 'editor'), { recursive: true })
 const electronVersion = require('electron/package.json').version
 const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version

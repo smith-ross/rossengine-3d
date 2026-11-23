@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Anchor, Box, Braces, ChevronDown, Circle, CircleStop, Cylinder, FileCode2, FilePlus, FolderOpen, Group, Hammer, Link,
   MapPin, Menu, MousePointer2, Move, Play, Plus, Redo2, RotateCw, Save, Scaling, Shapes, Triangle, Undo2, Ungroup, Upload, Layers,
-  Trash2,
+  Trash2, Users,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
 import { characterControllerTarget, insertCharacterController, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
@@ -132,7 +132,7 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         <Btn icon={<Shapes size={18} />} label="Model" disabled={playing} title="Import a 3D model file (.glb, .gltf, .obj, .fbx, .stl) as a MeshPart"
           onClick={async () => { for (const a of await importFiles(await pickFiles('mesh'))) await insertAsset(a) }} />
         <Drop icon={<FileCode2 size={18} />} label="Script" disabled={playing}>
-          {(close) => <LanguageMenu onPick={(l) => { insertScript('Script', l); close() }} onCharacter={(l) => { insertCharacterController(l); close() }} />}
+          {(close) => <LanguageMenu onPick={(l) => { insertScript('Script', l); close() }} onCharacter={(l) => { insertCharacterController(l); close() }} onLocal={(l) => { insertScript('LocalScript', l); close() }} />}
         </Drop>
         <Drop icon={<Braces size={18} />} label="Module" disabled={playing}>
           {(close) => <LanguageMenu module onPick={(l) => { insertScript('ModuleScript', l); close() }} />}
@@ -157,13 +157,28 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         ) : (
           <Btn icon={<CircleStop size={18} />} label="Stop" className="stop" onClick={() => editor.stop()} title="Stop (Shift+F5)" />
         )}
+        <Drop icon={<Users size={18} />} label="Players" disabled={playing || ed.starting}>
+          {(close) => (
+            <div onClick={close}>
+              <div className="menu-cat">Test multiplayer</div>
+              {[2, 3, 4].map((n) => (
+                <div key={n} className="menu-item" title="You host the game here; the other players get their own windows"
+                  onClick={() => void editor.playMultiplayer(n)}><span><Users size={13} /> {n} players</span></div>
+              ))}
+              <div className="menu-sep" />
+              <div className="menu-item" onClick={() => editor.mutate(() => { const n = editor.game.getService('NetworkService'); n.set('Enabled', !n.get('Enabled')) })}>
+                <span>{ed.game.getService('NetworkService').get('Enabled') ? 'Make the game single-player' : 'Make the game multiplayer'}</span>
+              </div>
+            </div>
+          )}
+        </Drop>
         <Btn icon={<Hammer size={18} />} label="Build" disabled={playing} onClick={onBuild} title="Build a standalone desktop app" />
       </Group_>
     </div>
   )
 }
 
-function LanguageMenu({ onPick, module, onCharacter }: { onPick: (l: ScriptLanguage) => void; module?: boolean; onCharacter?: (l: ScriptLanguage) => void }) {
+function LanguageMenu({ onPick, module, onCharacter, onLocal }: { onPick: (l: ScriptLanguage) => void; module?: boolean; onCharacter?: (l: ScriptLanguage) => void; onLocal?: (l: ScriptLanguage) => void }) {
   // a CharacterBody3D (or something holding one) is selected: offer the ready-made controller too
   const target = onCharacter ? characterControllerTarget() : null
   const hint: Record<ScriptLanguage, string> = {
@@ -180,6 +195,18 @@ function LanguageMenu({ onPick, module, onCharacter }: { onPick: (l: ScriptLangu
           <span className="menu-shortcut">{hint[l]}</span>
         </div>
       ))}
+      {onLocal && !!editor.game.getService('NetworkService').get('Enabled') && (
+        <>
+          <div className="menu-sep" />
+          <div className="menu-cat">New LocalScript (runs for each player)</div>
+          {LANGUAGES.map((l) => (
+            <div key={'l' + l} className="menu-item" title="Multiplayer: runs on each player's own machine (input, camera, GUI). Scripts run once, on the host." onClick={() => onLocal(l)}>
+              <span><ClassIcon cls="LocalScript" lang={l} /> {l}</span>
+              <span className="menu-shortcut">{hint[l]}</span>
+            </div>
+          ))}
+        </>
+      )}
       {target && (
         <>
           <div className="menu-sep" />

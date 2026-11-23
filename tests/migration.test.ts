@@ -4,7 +4,7 @@ import { DataModel } from '../src/engine/classes'
 import { deserialize } from '../src/engine/instance'
 
 describe('place migration', () => {
-  it('maps client/server classes onto the single-script model', () => {
+  it('maps Roblox service names onto ours (LocalScripts stay LocalScripts: in single-player they run like Scripts)', () => {
     const old = {
       className: 'DataModel', ref: 1, props: { Name: 'Game' }, children: [
         { className: 'ServerScriptService', ref: 2, props: { Name: 'ServerScriptService' }, children: [
@@ -24,7 +24,7 @@ describe('place migration', () => {
     deserialize(old as any, g)
     g.initServices()
     const ss = g.getService('ScriptService')
-    expect(ss.children.map((c) => `${c.className}:${c.name}`).sort()).toEqual(['Script:Client', 'Script:Main'])
+    expect(ss.children.map((c) => `${c.className}:${c.name}`).sort()).toEqual(['LocalScript:Client', 'Script:Main'])
     expect(g.getService('Storage').findFirstChild('Util')?.className).toBe('ModuleScript')
     expect(g.getService('ReplicatedStorage')).toBe(g.getService('Storage'))
     expect(g.getService('StarterPlayer').findFirstChild('StarterPlayerScripts')).toBeNull()
