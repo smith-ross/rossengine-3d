@@ -6,6 +6,7 @@ import { Instance, createInstance } from '../../engine/instance'
 import { TileMap, isNode2D, setWorldPosition, worldPosition } from '../../engine/classes2d'
 import { Renderer2D } from '../../engine/render/Renderer2D'
 import { Animator2D } from '../../engine/game/Animator2D'
+import { BillboardLayer } from '../../engine/gui/BillboardLayer'
 import { GuiRenderer } from '../../engine/gui/GuiRenderer'
 import { assets, contentRef } from '../../engine/assets'
 import { editor, useEditor } from '../store'
@@ -41,6 +42,10 @@ export function Viewport2D() {
     r.showGrid = overlays.grid
     r.showCollision = overlays.collision
     r.showCamera = overlays.camera
+    // billboards over the world, under the ScreenGuis
+    const billboards = new BillboardLayer(el, game, r)
+    billboards.guiSource = game.getService('StarterGui')
+    billboards.root.style.zIndex = '1'
     const gui = new GuiRenderer(el)
     gui.interactive = false
     gui.root.style.zIndex = '2'
@@ -49,6 +54,7 @@ export function Viewport2D() {
     const dom = r.renderer.domElement
 
     r.onBeforeRender = (dt) => {
+      billboards.selection = editor.selection
       r.view = { ...view2d }
       const zoomText = `${Math.round(view2d.zoom * 100)}%`
       if (zoomRef.current && zoomRef.current.textContent !== zoomText) zoomRef.current.textContent = zoomText
@@ -223,6 +229,7 @@ export function Viewport2D() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
       gui.dispose()
+      billboards.dispose()
       r.dispose()
       rRef.current = null
     }

@@ -6,6 +6,7 @@ import { CFrame, Vector3 } from '../../engine/datatypes'
 import { Instance } from '../../engine/instance'
 import { BasePart, Model, partsOf } from '../../engine/classes'
 import { SceneRenderer } from '../../engine/render/SceneRenderer'
+import { BillboardLayer } from '../../engine/gui/BillboardLayer'
 import { GuiRenderer } from '../../engine/gui/GuiRenderer'
 import { editor, useEditor } from '../store'
 import { insertHint, selectionPivot } from '../ops'
@@ -35,6 +36,9 @@ export function Viewport() {
     const el = editRef.current!
     const r = new SceneRenderer(el, game)
     rendererRef.current = r
+    // billboards over the world, under the ScreenGuis
+    const billboards = new BillboardLayer(el, game, r)
+    billboards.guiSource = game.getService('StarterGui')
     const gui = new GuiRenderer(el)
     gui.interactive = false
     gui.setSource(game.getService('StarterGui'))
@@ -188,6 +192,7 @@ export function Viewport() {
     }
     applyCam()
     r.onBeforeRender = (dt) => {
+      billboards.selection = editor.selection
       if (editor.playing) return
       const typing = document.activeElement && document.activeElement !== dom && document.activeElement !== document.body
       if (!typing && keys.size) {
@@ -393,6 +398,7 @@ export function Viewport() {
       tc.detach()
       tc.dispose()
       gui.dispose()
+      billboards.dispose()
       r.dispose()
       rendererRef.current = null
     }

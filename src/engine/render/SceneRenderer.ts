@@ -2,7 +2,8 @@
 import * as THREE from 'three'
 import { CFrame, Color3, EnumItem, Vector3 } from '../datatypes'
 import { Instance } from '../instance'
-import { BasePart, DataModel } from '../classes'
+import { BasePart, DataModel, Model } from '../classes'
+import type { BillboardAnchor, BillboardHost } from '../gui/BillboardLayer'
 import { materialTexture } from './textures'
 import { cloneMesh, loadMesh, loadTexture } from './meshes'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -85,7 +86,10 @@ function faceMatrix(face: string, s: Vector3): THREE.Matrix4 {
   }
 }
 
-export class SceneRenderer {
+export class SceneRenderer implements BillboardHost {
+  readonly kind = '3d' as const
+  /** run after each rendered frame (billboards are placed here, from the camera just used) */
+  afterRender: Array<() => void> = []
   readonly renderer: THREE.WebGLRenderer
   readonly scene = new THREE.Scene()
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.1, 5000)
@@ -229,6 +233,59 @@ export class SceneRenderer {
     const screen = this.screenPasses()
     if (screen) screen.composer.render()
     else this.renderer.render(this.scene, this.camera)
+    for (const f of this.afterRender) f()
+  }
+
+  // ------------------------------------------------------------------ billboards
+  get billboardWorld() { return this.game.workspace }
+
+  /** The point a BillboardGui on `adornee` hangs at: its centre, plus offsets in camera space and in world space. */
+  private billboardPoint(adornee: Instance, offset: Vector3, worldOffset: Vector3): THREE.Vector3 | null {
+    if (!adornee.isDescendantOf(this.game.workspace)) return null
+    let c: Vector3
+    if (adornee instanceof BasePart) c = adornee.cframe.position
+    else if (adornee instanceof Model) c = adornee.getPivot().position
+    else return null
+    const p = new THREE.Vector3(c.x + worldOffset.x, c.y + worldOffset.y, c.z + worldOffset.z)
+    const m = this.camera.matrixWorld.elements // columns: right, up, back
+    p.x += m[0] * offset.x + m[4] * offset.y + m[8] * offset.z
+    p.y += m[1] * offset.x + m[5] * offset.y + m[9] * offset.z
+    p.z += m[2] * offset.x + m[6] * offset.y + m[10] * offset.z
+    return p
+  }
+
+  billboardAnchor(adornee: Instance, offset: Vector3, worldOffset: Vector3): BillboardAnchor | null {
+    const p = this.billboardPoint(adornee, offset, worldOffset)
+    if (!p) return null
+    const depth = -p.clone().applyMatrix4(this.camera.matrixWorldInverse).z
+    if (depth < 0.1) return null // behind the camera
+    const ndc = p.clone().project(this.camera)
+    const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1
+    return {
+      x: ((ndc.x + 1) / 2) * w,
+      y: ((1 - ndc.y) / 2) * h,
+      unitPx: h / (2 * Math.tan((this.camera.fov * Math.PI) / 360) * depth),
+      dist: p.distanceTo(this.camera.position),
+    }
+  }
+
+  /** Something visible (other than the adornee itself) between the camera and the billboard. */
+  billboardHidden(adornee: Instance, offset: Vector3, worldOffset: Vector3): boolean {
+    const p = this.billboardPoint(adornee, offset, worldOffset)
+    if (!p) return true
+    const from = this.camera.position
+    const dist = p.distanceTo(from)
+    const ray = new THREE.Raycaster(from.clone(), p.clone().sub(from).normalize(), 0, Math.max(0, dist - 0.05))
+    const objs = [...this.views.values()].filter((v) => v.obj.visible).map((v) => v.obj)
+    for (const hit of ray.intersectObjects(objs, true)) {
+      if (!hit.object.visible) continue
+      let o: THREE.Object3D | null = hit.object
+      while (o && !o.userData.instance) o = o.parent
+      const inst = o?.userData.instance as Instance | undefined
+      if (!inst || inst === adornee || inst.isDescendantOf(adornee)) continue
+      return true
+    }
+    return false
   }
 
   // ------------------------------------------------------------------ rigs

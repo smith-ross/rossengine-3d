@@ -11,6 +11,8 @@ import { DataModel } from '../classes'
 import { TileMap, Xform, apply, invert, isNode2D, localXform, worldPosition as worldPositionOf, xformRotation } from '../classes2d'
 import { ParticleSystem, arcDirection, readSettings, requestsOf } from './particles'
 import { assets } from '../assets'
+import type { BillboardAnchor, BillboardHost } from '../gui/BillboardLayer'
+import type { Vector3 } from '../datatypes'
 
 const IDENTITY: Xform = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
 const mulX = (p: Xform, q: Xform): Xform => ({
@@ -71,7 +73,10 @@ export interface Renderer2DOptions {
   editor?: boolean
 }
 
-export class Renderer2D {
+export class Renderer2D implements BillboardHost {
+  readonly kind = '2d' as const
+  /** run after each rendered frame (billboards are placed here) */
+  afterRender: Array<() => void> = []
   readonly renderer: THREE.WebGLRenderer
   readonly scene = new THREE.Scene()
   readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000)
@@ -243,6 +248,18 @@ export class Renderer2D {
     const screen = this.screenPasses()
     if (screen) screen.composer.render()
     else this.renderer.render(this.scene, this.camera)
+    for (const f of this.afterRender) f()
+  }
+
+  // ------------------------------------------------------------------ billboards
+  get billboardWorld() { return this.world2d }
+
+  /** A BillboardGui on a 2D object: at its position plus StudsOffset (x, y in world pixels, y down like Position). */
+  billboardAnchor(adornee: Instance, offset: Vector3, worldOffset: Vector3): BillboardAnchor | null {
+    if (!isNode2D(adornee) || !adornee.isDescendantOf(this.world2d)) return null
+    const p = worldPos(this.nodes, adornee)
+    const v = this.worldToViewport(new Vector2(p.x + offset.x + worldOffset.x, p.y + offset.y + worldOffset.y))
+    return { x: v.x, y: v.y, unitPx: this.view.zoom, dist: 0 }
   }
 
   // ------------------------------------------------------------------ custom shaders

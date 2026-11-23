@@ -8,6 +8,7 @@ import { LuauRuntime, OutputSink } from '../luau/LuauRuntime'
 import { Physics, initPhysics } from '../physics/Physics'
 import { SceneRenderer } from '../render/SceneRenderer'
 import { GuiRenderer } from '../gui/GuiRenderer'
+import { BillboardLayer } from '../gui/BillboardLayer'
 import { CharacterController, buildDefaultCharacter, findHumanoidModel } from './Character'
 import { TweenManager } from './Tweens'
 import { DragLook, keyCodeName } from './Input'
@@ -49,6 +50,7 @@ export class GameSession implements Runtime, Runtime2D {
   private syncingSave = false
   scripts!: ScriptHost
   gui!: GuiRenderer
+  billboards!: BillboardLayer
   private tweens = new TweenManager()
   private controllers = new Map<Model, CharacterController>()
   private keys = new Set<string>()
@@ -108,6 +110,10 @@ export class GameSession implements Runtime, Runtime2D {
       this.phys2d = new Physics2D(game)
       ;(game as any).runtime2d = this
     }
+    // billboards sit over the game, under the ScreenGuis
+    this.billboards = new BillboardLayer(this.wrapper, game, this.r2d ?? this.renderer)
+    this.billboards.interactive = true
+    this.billboards.root.style.zIndex = '4'
     this.gui = new GuiRenderer(this.wrapper)
     this.gui.root.style.zIndex = '5'
     this.luau = await LuauRuntime.create(game, this.opts.output)
@@ -172,6 +178,7 @@ export class GameSession implements Runtime, Runtime2D {
     this.phys2d?.dispose()
     ;(this.game as any).runtime2d = null
     this.gui.dispose()
+    this.billboards?.dispose()
     this.wrapper.remove()
     this.game.runtime = null
     setActiveRuntime(null)
@@ -237,6 +244,7 @@ export class GameSession implements Runtime, Runtime2D {
     const playerGui = p.findFirstChild('PlayerGui')!
     for (const g of this.game.getService('StarterGui').children) g.clone().setParent(playerGui)
     this.gui.setSource(playerGui)
+    this.billboards.guiSource = playerGui
     if (players.get('CharacterAutoLoads') && !this.mode2d) this.loadCharacter(p)
   }
 
@@ -300,7 +308,7 @@ export class GameSession implements Runtime, Runtime2D {
     // player movement from keyboard (camera relative)
     const ctl = this.localController()
     if (ctl) {
-      const typing = !!this.gui.focused
+      const typing = !!(this.gui.focused || this.billboards.focused)
       const f = typing ? 0 : (this.keys.has('W') || this.keys.has('Up') ? 1 : 0) - (this.keys.has('S') || this.keys.has('Down') ? 1 : 0)
       const r = typing ? 0 : (this.keys.has('D') ? 1 : 0) - (this.keys.has('A') ? 1 : 0)
       const fwd = new Vector3(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw))
@@ -491,7 +499,7 @@ export class GameSession implements Runtime, Runtime2D {
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) && !this.wrapper.contains(t)) return
       const key = keyCodeName(e.code)
-      const processed = !!this.gui.focused
+      const processed = !!(this.gui.focused || this.billboards.focused)
       if (!processed && ['Space', 'Up', 'Down', 'Tab'].includes(key)) e.preventDefault()
       if (!processed) this.keys.add(key)
       const io = makeInput('Keyboard', 'Begin', key)
@@ -508,7 +516,7 @@ export class GameSession implements Runtime, Runtime2D {
       const key = keyCodeName(e.code)
       this.keys.delete(key)
       const io = makeInput('Keyboard', 'End', key)
-      uis().fire('InputEnded', io, !!this.gui.focused)
+      uis().fire('InputEnded', io, !!(this.gui.focused || this.billboards.focused))
       this.luau.contextAction(key, 'End', io)
       this.mouseObj?.fire('KeyUp', e.key.toLowerCase())
     })

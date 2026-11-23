@@ -51,6 +51,7 @@ src/engine/            the engine (shared by the editor's Play mode and the play
   physics/Physics.ts   Rapier world, Touched events, raycasts, welds
   render/              three.js scene mirror, materials, sky
   gui/GuiRenderer.ts   ScreenGui -> DOM overlay
+  gui/BillboardLayer.ts BillboardGui: GUI over parts / 2D objects, placed each frame
   game/                GameSession (game loop), characters, tweens, input
   assets.ts            place asset store (imported files, embedded in the place)
 src/editor/            React editor (Explorer, Properties, Viewport, Monaco, Output, Assets, Build)
@@ -77,7 +78,7 @@ Supported API includes:
 - **Instance API:** `FindFirstChild`, `WaitForChild`, `GetChildren`, `GetDescendants`, attributes, tags, `Changed`, `GetPropertyChangedSignal`, `ChildAdded`, and more.
 - **Services:** Players, RunService (`Heartbeat`, `RenderStepped`, `BindToRenderStep`), UserInputService, ContextActionService, TweenService, Debris, HttpService (JSON), CollectionService, Lighting.
 - **Parts:** physics and `Touched`, Humanoid characters (walking, jumping, death and respawn, `MoveTo`), ClickDetector, Sound, MeshPart, Decal, PointLight and SpotLight.
-- **GUI:** ScreenGui with Frame, TextLabel, TextButton, TextBox, ImageLabel, UICorner, UIStroke and UIListLayout.
+- **GUI:** ScreenGui with Frame, TextLabel, TextButton, TextBox, ImageLabel, UICorner, UIStroke and UIListLayout. BillboardGui shows the same elements over things in the world (see [Billboards](#billboards)).
 
 Scripts in any language that loop without yielding are stopped after 8 seconds ("Script timeout").
 
@@ -317,6 +318,24 @@ Scripts can fire bursts with `Emit` and remove what's out with `Clear`:
 local sparks = workspace.Chest.ParticleEmitter
 sparks.Enabled = false      -- only bursts
 sparks:Emit(40)             -- e.g. when the chest opens
+```
+
+## Billboards
+
+A `BillboardGui` is GUI that floats over something in the world and always faces the camera: name tags, health bars, signs, "Press E" prompts. It holds the same elements as a ScreenGui (TextLabel, Frame, ImageLabel, buttons and so on).
+
+- **Where it shows:** put it inside a part or model in Workspace, or inside a 2D object in World2D. It can also go in StarterGui with its `Adornee` set to what it should hover over.
+- **Inserting one:** with a part (or 2D object) selected, use Insert → Object → BillboardGui, or **2D → Billboard label**. You get a label that reads "Hello!", just above the selection. With nothing selected, it comes on a new invisible holder.
+- **`Size`:** scale is in studs (in 2D, world pixels), so `{4, 0}, {1, 0}` is 4 × 1 studs and gets smaller with distance. Offset alone, such as `{0, 200}, {0, 50}`, keeps it that many pixels on screen at any distance.
+- **`StudsOffset`:** moves it relative to the camera, so `(0, 3, 0)` is always "above". `StudsOffsetWorldSpace` moves it in world directions instead. In 2D both are in world pixels, with y pointing down like `Position`.
+- **`AlwaysOnTop`:** shows it through walls. By default it hides when something is between it and the camera.
+- **`MaxDistance`:** hides it beyond this many studs (0 = no limit). `Enabled` and `ClipsDescendants` work as on a ScreenGui.
+
+Scripts change billboards like any GUI:
+
+```lua
+local tag = workspace.Shopkeeper.BillboardGui.TextLabel
+tag.Text = "Shop (open)"
 ```
 
 ## Saving data

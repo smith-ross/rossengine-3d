@@ -906,6 +906,25 @@ defineClass(ScreenGui, {
     IgnoreGuiInset: { type: 'bool', category: 'Behavior' },
   },
 })
+/**
+ * GUI shown in the world: over the part or model it is inside (or its Adornee), facing the camera.
+ * In 2D it sits on a 2D object. Size's scale is in studs (2D: world pixels) and grows and shrinks
+ * with distance; a Size in offset (pixels) only stays the same size on screen.
+ */
+class BillboardGui extends LayerCollector {}
+defineClass(BillboardGui, {
+  name: 'BillboardGui', superclass: 'LayerCollector', category: 'GUI',
+  props: {
+    Enabled: { type: 'bool', default: () => true, category: 'Behavior' },
+    Adornee: { type: 'Instance', category: 'Data' },
+    Size: { type: 'UDim2', default: () => new UDim2(4, 0, 1, 0), category: 'Layout' },
+    StudsOffset: { type: 'Vector3', category: 'Layout' },
+    StudsOffsetWorldSpace: { type: 'Vector3', category: 'Layout' },
+    AlwaysOnTop: { type: 'bool', category: 'Behavior' },
+    MaxDistance: { type: 'number', category: 'Behavior' },
+    ClipsDescendants: { type: 'bool', category: 'Appearance' },
+  },
+})
 export class GuiObject extends Instance {}
 defineClass(GuiObject, {
   name: 'GuiObject', superclass: 'Instance', creatable: false,

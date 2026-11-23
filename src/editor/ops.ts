@@ -1,5 +1,5 @@
 // Editing operations on the edit DataModel (all undoable).
-import { CFrame, Color3, Vector2, Vector3, enumItem } from '../engine/datatypes'
+import { CFrame, Color3, UDim2, Vector2, Vector3, enumItem } from '../engine/datatypes'
 import { Instance, SerializedInstance, createInstance, deserialize, getClass, serialize } from '../engine/instance'
 import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
@@ -119,6 +119,7 @@ export function insertObject(className: string, parent?: Instance): Instance {
       inst.set('Position', new Vector2(Math.round(view2d.x), Math.round(view2d.y)))
     }
     if (className === 'Camera2D') editor.game.getService('World2D').set('CurrentCamera', inst)
+    if (className === 'BillboardGui') return insertBillboard(inst, parent)
     if (className === 'ParticleEmitter' && !((parent ?? defaultParentFor(className)) instanceof BasePart)) {
       // particles stream out of a part: with no part selected, make an invisible one to hold them
       const holder = createInstance('Part')
@@ -136,7 +137,7 @@ export function insertObject(className: string, parent?: Instance): Instance {
     }
     if (className === 'Frame' || className === 'TextLabel' || className === 'TextButton' || className === 'TextBox' || className === 'ImageLabel') {
       const p = parent ?? defaultParentFor(className)
-      if (!(p.className === 'ScreenGui' || p.isA('GuiObject'))) {
+      if (!(p.isA('LayerCollector') || p.isA('GuiObject'))) {
         // GUI objects need a ScreenGui
         const sg = createInstance('ScreenGui')
         sg.setParent(editor.game.getService('StarterGui'))
@@ -167,6 +168,55 @@ export function insertObject(className: string, parent?: Instance): Instance {
     if (isCode(inst)) editor.openScript(inst)
     return inst
   })
+}
+
+/**
+ * A BillboardGui with a label in it, ready to edit: on the selected part / model / 2D object, or on a
+ * new invisible holder (a part in 3D, a node in 2D) when nothing like that is selected.
+ */
+function insertBillboard(bb: Instance, parent?: Instance): Instance {
+  const in2d = !!editor.game.getService('World2D').get('Enabled')
+  const target = parent ?? editor.selection[0]
+  const fits = (i?: Instance | null) => !!i && (in2d ? i.isA('Node2D') : i instanceof BasePart || i.className === 'Model')
+  if (parent && (parent.className === 'StarterGui' || parent.isA('LayerCollector'))) {
+    // in a GUI container it shows on whatever its Adornee is set to
+    bb.setParent(parent)
+    editor.selection = [bb]
+    return bb
+  }
+  let holder: Instance
+  if (fits(target)) holder = target!
+  else if (in2d) {
+    holder = createInstance('Node2D')
+    holder.name = 'Billboard'
+    holder.set('Position', new Vector2(Math.round(view2d.x), Math.round(view2d.y)))
+    holder.setParent(editor.game.getService('World2D'))
+  } else {
+    holder = createInstance('Part')
+    holder.name = 'Billboard'
+    const p = insertHint.position
+    holder.set('Anchored', true)
+    holder.set('CanCollide', false)
+    holder.set('Transparency', 1)
+    holder.set('Size', new Vector3(1, 1, 1))
+    holder.set('CFrame', CFrame.fromPosition(new Vector3(Math.round(p.x), Math.round(p.y) + 3, Math.round(p.z))))
+    holder.setParent(editor.game.workspace)
+  }
+  if (in2d) { bb.set('Size', new UDim2(0, 120, 0, 30)); bb.set('StudsOffset', new Vector3(0, -20, 0)) }
+  else if (holder !== target || !(holder instanceof BasePart)) bb.set('StudsOffset', new Vector3(0, 0, 0))
+  else bb.set('StudsOffset', new Vector3(0, (holder as BasePart).size.y / 2 + 1, 0)) // just above the part
+  bb.setParent(holder)
+  const label = createInstance('TextLabel')
+  label.set('Size', new UDim2(1, 0, 1, 0))
+  label.set('BackgroundTransparency', 1)
+  label.set('Text', 'Hello!')
+  label.set('TextScaled', true)
+  label.set('TextColor3', Color3.fromRGB(255, 255, 255))
+  label.set('TextStrokeTransparency', 0)
+  label.set('Font', enumItem('Font', 'GothamBold'))
+  label.setParent(bb)
+  editor.selection = [bb]
+  return bb
 }
 
 export function insertPart(shape: 'Block' | 'Ball' | 'Cylinder' | 'Wedge' | 'Spawn') {
