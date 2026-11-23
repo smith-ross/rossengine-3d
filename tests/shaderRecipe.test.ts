@@ -83,4 +83,20 @@ describe('visual shader steps', () => {
     r.steps.push({ id: 'x', type: 'from-the-future', on: true, params: {} })
     expect(compileRecipe(r, 'screen').source).not.toContain('from-the-future')
   })
+  it('keeps 3D patterns visible on every face (stripes on the top for "up", whole dots at any height)', () => {
+    const src = (shape: 'stripes' | 'dots', kind: '3d' | '2d') => {
+      const r = defaultRecipe(kind)
+      const paint = newStep('paint')
+      paint.params.pattern = { shape, size: 1, speed: 0.5, direction: 'up' }
+      r.steps = [paint]
+      return compileRecipe(r, kind).source
+    }
+    expect(src('stripes', '3d')).toContain('rs_along(vec3(0.0, 1.0, 0.0))')
+    expect(src('stripes', '3d')).toContain('vec3 rs_along(vec3 d)')
+    expect(src('dots', '3d')).toContain('rs_surfaceDot(')
+    // 2D has no faces to worry about (and no WORLD_NORMAL)
+    expect(src('stripes', '2d')).not.toContain('rs_along')
+    expect(src('dots', '2d')).not.toContain('rs_surfaceDot')
+    for (const s of [src('stripes', '3d'), src('dots', '3d')]) expect(() => buildShader(s, '3d', [], 'test')).not.toThrow()
+  })
 })

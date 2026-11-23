@@ -51,6 +51,7 @@ const token = (p) => {
 let win = null
 let dirty = false
 let allowClose = false
+let altClicked = false // Alt is held for a click (see before-input-event)
 
 function createWindow() {
   win = new BrowserWindow({
@@ -71,6 +72,14 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url)
     return { action: 'deny' }
+  })
+  // On Windows, releasing Alt on its own focuses the menu bar, even if Alt was held for a click
+  // (extra cursors in the code editor). Skip that one release so typing still reaches the editor;
+  // tapping Alt by itself still opens the menu.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.key !== 'Alt') return
+    if (input.type === 'keyDown' && !input.isAutoRepeat) altClicked = false
+    else if (input.type === 'keyUp' && altClicked) { altClicked = false; e.preventDefault() }
   })
   win.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith('app://') && !(DEV_URL && url.startsWith(DEV_URL))) e.preventDefault()
@@ -211,6 +220,7 @@ function registerIpc() {
     child.unref()
     return true
   })
+  ipcMain.on('studio:alt-click', () => { altClicked = true })
   ipcMain.on('studio:dirty', (_e, d) => { dirty = !!d })
   ipcMain.on('studio:close', () => { allowClose = true; win && win.close() })
 }

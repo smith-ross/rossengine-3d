@@ -11,7 +11,8 @@ import type { OutputKind } from '../engine/luau/LuauRuntime'
 import { assets, SerializedAsset } from '../engine/assets'
 import { idbGet, idbSet } from './persist'
 import { onMeshError } from '../engine/render/meshes'
-import { onShaderErrors } from '../engine/render/shaders'
+import { onShaderErrors, shaderKindFor } from '../engine/render/shaders'
+import { RecipeKind, compileRecipe, parseRecipe } from '../engine/shaderRecipe'
 import { DEFAULT_SOURCE, languageOf } from '../engine/scripting/languages'
 
 export type Tool = 'select' | 'move' | 'scale' | 'rotate'
@@ -235,6 +236,7 @@ class EditorStore {
   }
 
   private replaceGame(g: DataModel) {
+    refreshVisualShaders(g)
     this.game = g
     this.selection = []
     this.tabs = []
@@ -278,6 +280,9 @@ class EditorStore {
     const g = new DataModel()
     const byRef = new Map<number, Instance>()
     deserialize(snap, g, byRef)
+    // the rebuilt objects keep the ids they had in the snapshot, so anything remembered by id
+    // (expanded Explorer folders, selection, open tabs) still finds them, even after several undos
+    for (const [ref, inst] of byRef) (inst as unknown as { id: number }).id = ref
     g.initServices()
     this.replaceGame(g)
     this.selection = selectedIds.map((id) => byRef.get(id)).filter((x): x is Instance => !!x)
@@ -389,4 +394,19 @@ export const editor = new EditorStore()
 export function useEditor() {
   useSyncExternalStore(editor.subscribe, () => editor.version)
   return editor
+}
+
+/** Visual (step) shaders store generated GLSL: regenerate it so places pick up fixes to the steps. */
+function refreshVisualShaders(g: DataModel) {
+  for (const sh of g.getDescendants()) {
+    if (sh.className !== 'Shader' && sh.className !== 'ScreenShader') continue
+    const recipe = parseRecipe(sh.get<string>('Recipe'))
+    if (!recipe) continue
+    try {
+      const out = compileRecipe(recipe, shaderKindFor(sh) as RecipeKind)
+      if (out.source !== sh.get<string>('Source')) sh.set('Source', out.source)
+    } catch (e) {
+      console.warn('could not regenerate visual shader', sh.getFullName(), e)
+    }
+  }
 }

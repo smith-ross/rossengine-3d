@@ -26,13 +26,25 @@ registerGlsl((model) => { const s = byUri.get(model.uri.toString()); return s &&
 const models = new Map<Instance, monaco.editor.ITextModel>()
 const byUri = new Map<string, Instance>()
 
+/**
+ * The model at a script's address. One may already exist for an earlier copy of the same script
+ * (after undo, or a TypeScript script at the same path): it then takes this script's current source.
+ */
+function adoptModel(uri: monaco.Uri, script: Instance, language: string) {
+  const source = script.get<string>('Source') ?? ''
+  const m = monaco.editor.getModel(uri)
+  if (!m) return monaco.editor.createModel(source, language, uri)
+  if (m.getValue() !== source) m.setValue(source)
+  return m
+}
+
 /** One model per script; recreated if the script's language or (for TypeScript) its path changed. */
 function modelFor(script: Instance) {
   if (isShaderInstance(script)) {
     let m = models.get(script)
     if (m && !m.isDisposed()) return m
     const uri = monaco.Uri.parse(`inmemory://shaders/${script.id}.glsl`)
-    m = monaco.editor.getModel(uri) ?? monaco.editor.createModel(script.get<string>('Source') ?? '', 'glsl', uri)
+    m = adoptModel(uri, script, 'glsl')
     models.set(script, m)
     byUri.set(uri.toString(), script)
     return m
@@ -46,7 +58,7 @@ function modelFor(script: Instance) {
     m.dispose()
   }
   const uri = monaco.Uri.parse(uriText)
-  m = monaco.editor.getModel(uri) ?? monaco.editor.createModel(script.get<string>('Source') ?? '', MONACO_LANGUAGE[lang], uri)
+  m = adoptModel(uri, script, MONACO_LANGUAGE[lang])
   models.set(script, m)
   byUri.set(uri.toString(), script)
   return m

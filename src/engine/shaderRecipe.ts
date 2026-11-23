@@ -91,6 +91,12 @@ const HELPERS: Record<string, { needs?: string[]; code: string }> = {
     needs: ['hash'],
     code: '// smooth random "clouds", roughly 0..1\nfloat rs_noise(vec3 p) {\n\tvec3 i = floor(p);\n\tvec3 f = fract(p);\n\tf = f * f * (3.0 - 2.0 * f);\n\treturn mix(\n\t\tmix(mix(rs_hash(i), rs_hash(i + vec3(1, 0, 0)), f.x), mix(rs_hash(i + vec3(0, 1, 0)), rs_hash(i + vec3(1, 1, 0)), f.x), f.y),\n\t\tmix(mix(rs_hash(i + vec3(0, 0, 1)), rs_hash(i + vec3(1, 0, 1)), f.x), mix(rs_hash(i + vec3(0, 1, 1)), rs_hash(i + vec3(1, 1, 1)), f.x), f.y),\n\t\tf.z);\n}',
   },
+  along: {
+    code: '// the pattern\'s direction on this surface: on a face it points straight out of (the top, for "up"),\n// it would be one flat band, so the pattern runs along the next axis there instead\nvec3 rs_along(vec3 d) { return abs(dot(WORLD_NORMAL, d)) > 0.999 ? d.zxy : d; }',
+  },
+  surfaceDot: {
+    code: '// distance to the nearest dot centre, measured along the surface (so every face shows whole dots)\nfloat rs_surfaceDot(vec3 q) {\n\tq = fract(q) - 0.5;\n\treturn length(q - WORLD_NORMAL * dot(q, WORLD_NORMAL));\n}',
+  },
   luma: { code: 'float rs_luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }' },
   hue: {
     code: '// rotate the hue of a colour by an angle (radians)\nvec3 rs_hue(vec3 c, float a) {\n\tconst vec3 k = vec3(0.57735);\n\tfloat ca = cos(a);\n\treturn c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);\n}',
@@ -102,7 +108,9 @@ const use = (ctx: Ctx, ...names: string[]) => { for (const n of names) { for (co
 export function patternGlsl(p: Pattern, ctx: Ctx): string {
   const size = f(Math.max(0.05, Number(p.size) || 1)), speed = f(Number(p.speed) || 0)
   const D = DIR[(ctx.kind !== '3d' && p.direction === 'forward') ? 'up' : p.direction] ?? DIR.up
-  const along = `(dot(P, ${D}) / ${size} - TIME * ${speed})`
+  const is3d = ctx.kind === '3d'
+  if (is3d && (p.shape === 'stripes' || p.shape === 'waves')) use(ctx, 'along')
+  const along = `(dot(P, ${is3d ? `rs_along(${D})` : D}) / ${size} - TIME * ${speed})`
   const moving = `(P / ${size} - ${D} * TIME * ${speed})`
   const local = ctx.kind === '3d' ? 'LOCAL_POSITION' : 'vec3(UV - 0.5, 0.0)'
   switch (p.shape) {
@@ -110,7 +118,9 @@ export function patternGlsl(p: Pattern, ctx: Ctx): string {
     case 'stripes': return `smoothstep(-0.1, 0.1, sin(${along} * 6.2831853))`
     case 'waves': return `(0.5 + 0.5 * sin(${along} * 6.2831853))`
     case 'checkers': return `mod(floor(${moving}.x) + floor(${moving}.y) + floor(${moving}.z), 2.0)`
-    case 'dots': return `(1.0 - smoothstep(0.22, 0.3, length(fract(${moving}) - 0.5)))`
+    case 'dots':
+      if (is3d) { use(ctx, 'surfaceDot'); return `(1.0 - smoothstep(0.22, 0.3, rs_surfaceDot(${moving})))` }
+      return `(1.0 - smoothstep(0.22, 0.3, length(fract(${moving}) - 0.5)))`
     case 'noise': use(ctx, 'noise'); return `rs_noise(${moving})`
     case 'sparkles': use(ctx, 'hash'); return `step(0.93, rs_hash(floor(P / ${size}) + floor(TIME * (${speed} + 0.5) * 4.0)))`
     case 'gradient': return `clamp(dot(${local}, ${D}) + 0.5, 0.0, 1.0)`
@@ -474,7 +484,7 @@ export function compileRecipe(recipe: Recipe, kind: RecipeKind): CompiledRecipe 
     '// or choose "Convert to code" to change this GLSL by hand.',
     '',
   ]
-  const order = ['hash', 'noise', 'luma', 'hue'].filter((h) => ctx.helpers.has(h))
+  const order = ['hash', 'noise', 'along', 'surfaceDot', 'luma', 'hue'].filter((h) => ctx.helpers.has(h))
   for (const h of order) out.push(HELPERS[h].code, '')
   out.push(
     'vec4 fragment() {',

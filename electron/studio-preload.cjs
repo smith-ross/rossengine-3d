@@ -19,3 +19,7 @@ contextBridge.exposeInMainWorld('rossStudio', {
     return () => ipcRenderer.removeListener('studio:menu', listener)
   },
 })
+
+// Alt+click (extra cursors in the code editor, picking inside bodies in the viewport): tell the main
+// process, so letting go of Alt afterwards doesn't put the keyboard in the menu bar.
+window.addEventListener('mousedown', (e) => { if (e.altKey) ipcRenderer.send('studio:alt-click') }, true)
