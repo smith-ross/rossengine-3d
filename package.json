@@ -1,6 +1,6 @@
 {
   "name": "rossengine3d",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Browser 3D engine scripted in Luau, with editor and Electron runtime",
   "scripts": {
     "dev": "vite",
