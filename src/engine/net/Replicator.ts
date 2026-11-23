@@ -43,6 +43,7 @@ export function netSerialize(inst: Instance, game: Instance): SerializedInstance
     const props: Record<string, unknown> = {}
     for (const [name, def] of n.classInfo.props) {
       if ((def.get && !def.persist) || name === 'Parent' || (n.className === 'Players' && name === 'LocalPlayer')) continue
+      if (name === 'NetworkOwner' && !n.props.get(name)) continue // (almost nothing has one: keep snapshots small)
       props[name] = encodeValue(def.get ? def.get(n) : n.props.get(name), refOf)
     }
     props.Name = n.name
@@ -58,11 +59,17 @@ export function netSerialize(inst: Instance, game: Instance): SerializedInstance
 export function ownerOf(inst: Instance, game: DataModel): Instance | null {
   const players = game.getService('Players').children.filter((p) => p.className === 'Player')
   if (!players.length) return null
+  // the nearest owner up the tree: one set with SetNetworkOwner, or a player's character
   for (let a: Instance | null = inst; a && a !== game; a = a.parent) {
+    const set = a.props.get('NetworkOwner') as Instance | null | undefined
+    if (set && players.includes(set)) return set
     for (const p of players) if (p.get('Character') === a) return p
   }
   return null
 }
+
+/** Did this change move control of something between machines? */
+const ownershipProp = (i: Instance, prop: string) => prop === 'NetworkOwner' || (prop === 'Character' && i.className === 'Player')
 
 /**
  * Attributes travel key by key: only the ones that changed since the last send (so one machine
@@ -124,6 +131,8 @@ class Smoother {
     return true
   }
   cancel(inst: Instance, prop?: string) { if (prop) this.moves.get(inst)?.delete(prop); else this.moves.delete(inst) }
+  /** stop gliding whatever this machine controls now (it just changed hands) */
+  cancelWhere(mine: (inst: Instance) => boolean) { for (const inst of [...this.moves.keys()]) if (mine(inst)) this.moves.delete(inst) }
   step(dt: number, set: (inst: Instance, prop: string, v: unknown) => void) {
     for (const [inst, m] of this.moves) {
       if (inst.destroyed) { this.moves.delete(inst); continue }
@@ -179,7 +188,12 @@ export class NetHost {
       removing: (i) => this.struct.push(['remove', i]),
       reparented: (i) => this.struct.push(['move', i]),
       changed: (i, prop) => {
-        if (prop === 'Character' && i.className === 'Player') hooks.ownershipChanged()
+        if (ownershipProp(i, prop)) {
+          hooks.ownershipChanged()
+          // back with the host: stop gliding towards the last thing the player sent
+          const me = hooks.hostPlayer()
+          this.smoother.cancelWhere((x) => { const o = ownerOf(x, game); return !o || o === me })
+        }
         if (this.smoothing || SKIP_PROPS.has(prop) || !this.known.has(i) || localOnly(i, prop)) return
         let m = this.dirty.get(i)
         if (!m) { m = new Map(); this.dirty.set(i, m) }
@@ -398,7 +412,11 @@ export class NetClient {
     this.disposeObserver = hooks.game.observe({
       removing: (i) => this.unbind(i),
       changed: (i, prop) => {
-        if (prop === 'Character' && i.className === 'Player') hooks.ownershipChanged()
+        if (ownershipProp(i, prop)) {
+          hooks.ownershipChanged()
+          const me = hooks.localPlayer()
+          if (me) this.smoother.cancelWhere((x) => ownerOf(x, hooks.game) === me) // ours now: no more gliding
+        }
         if (this.applying || SKIP_PROPS.has(prop) || !this.netOf.has(i)) return
         // what this player controls goes to the host
         const me = hooks.localPlayer()

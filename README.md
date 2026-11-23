@@ -358,10 +358,31 @@ Games are single-player unless you turn multiplayer on: **NetworkService → Ena
 | Their own character | | ✓ moves it; everyone else sees it move |
 
 - Changes made by the host's Scripts reach every player: new parts, colours, positions, attributes, sounds and so on.
-- Changes a player's LocalScripts make to the world stay on their machine. The exception is their own character (`player.Character` and everything in it), which everyone sees.
+- Changes a player's LocalScripts make to the world stay on their machine. The exceptions are their own character (`player.Character` and everything in it) and anything the host has handed to them (below): everyone sees those.
 - Each machine has its own camera, mouse and GUI (PlayerGui).
 - Players get Workspace, World2D, Players, Lighting, Storage, StarterGui, StarterPlayer, SoundService and the LocalScripts and modules in ScriptService. Scripts and SaveService stay on the host.
 - 3D characters load automatically for everyone, and players spawn spread out over the SpawnLocations. In 2D, give each player their own body from a Script: `player.Character = body`. Their LocalScript then moves `Players.LocalPlayer.Character`.
+
+**Handing an object to a player:** the host can give a player control of any object, and of everything inside it. That player's changes to it then reach the host and everyone else. Use it for a car they drive, a ball they carry, or a door only they can open.
+
+```lua
+-- Script (host)
+workspace.Kart:SetNetworkOwner(player)   -- now that player's machine moves it
+workspace.Kart:GetNetworkOwner()         --> player (nil when the host has it)
+workspace.Kart:SetNetworkOwner(nil)      -- back to the host (SetNetworkOwnershipAuto() does the same)
+
+-- LocalScript (that player)
+if workspace.Kart:GetNetworkOwner() == game.Players.LocalPlayer then
+	workspace.Kart.Body.Color = Color3.new(1, 0, 0)   -- everyone sees it
+end
+```
+
+- The owner's property and attribute changes are sent, including positions.
+- Unanchored parts are simulated by the owner's physics, and the other machines glide along with them.
+- The host can still change an owned object (for example to teleport it), and the owner gets that.
+- Creating or deleting objects is still done by the host; ask it with a RemoteEvent.
+- Ownership ends when the player leaves, or when the host calls `SetNetworkOwner(nil)`.
+- A player's character is theirs automatically.
 
 **Talking between machines:** put a `RemoteEvent` or `RemoteFunction` in Storage (Insert → Object → Communication).
 

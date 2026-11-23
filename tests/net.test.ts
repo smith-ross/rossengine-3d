@@ -132,6 +132,42 @@ describe('multiplayer', () => {
     expect((host.workspace.findFirstChild('Floor') as BasePart).cframe.position.y).toBe(0)
   })
 
+  it('lets the host hand any object to a player (SetNetworkOwner), and take it back', async () => {
+    const { host, game, me, tick } = await session()
+    const guestOnHost = host.getService('Players').children.find((p) => p.name === 'Guest')!
+    const cart = make('Model', host.workspace, { Name: 'Cart' })
+    const wheel = make('Part', cart, { Name: 'Wheel' }) as BasePart
+    tick()
+    const myCart = game.workspace.findFirstChild('Cart')!
+    const myWheel = myCart.findFirstChild('Wheel') as BasePart
+    // not theirs yet: what the player does to it stays on their machine
+    myWheel.set('Color', new Color3(0, 1, 0))
+    tick(2)
+    expect(wheel.get<Color3>('Color').g).not.toBe(1)
+    // the host hands it over (what Instance:SetNetworkOwner(player) does on the host)
+    cart.set('NetworkOwner', guestOnHost)
+    tick()
+    expect(myCart.get('NetworkOwner')).toBe(me)
+    myWheel.set('Color', new Color3(0, 0, 1))
+    myWheel.set('CFrame', CFrame.fromPosition(new Vector3(0, 0, 7)))
+    myWheel.attributes.set('Fuel', 3)
+    game.notifyChanged(myWheel, 'Attributes')
+    tick(4)
+    expect(wheel.get<Color3>('Color').b).toBe(1)
+    expect(wheel.cframe.position.z).toBeCloseTo(7, 3)
+    expect(wheel.attributes.get('Fuel')).toBe(3)
+    // the host can still change it (e.g. a teleport), and the owner gets that
+    wheel.set('Transparency', 0.25)
+    tick()
+    expect(myWheel.get<number>('Transparency')).toBe(0.25)
+    // given back: the player's changes stop counting
+    cart.set('NetworkOwner', null)
+    tick()
+    myWheel.set('Color', new Color3(1, 1, 0))
+    tick(2)
+    expect(wheel.get<Color3>('Color').r).toBe(0)
+  })
+
   it('delivers RemoteEvents in order with the changes', async () => {
     const { host, net, game, tick } = await session()
     const remote = host.getService('Storage').findFirstChild('Ping')!

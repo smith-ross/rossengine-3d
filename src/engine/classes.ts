@@ -49,6 +49,9 @@ export interface Runtime {
   remoteRespond(id: number, ok: boolean, value: unknown): void
   /** the address other players type to join this host ('' when not hosting) */
   hostAddress(): string
+  /** Instance:SetNetworkOwner / GetNetworkOwner */
+  setNetworkOwner(inst: Instance, player: Instance | null): void
+  networkOwner(inst: Instance): Instance | null
 }
 
 /** 'solo': single player (multiplayer off, or playing alone); 'host': runs the game for everyone; 'client': joined a host. */
@@ -82,8 +85,18 @@ defineClass(InstanceBase, {
     Parent: { type: 'Instance', get: (i: Instance) => i.parent, set: (i: Instance, v: Instance | null) => i.setParent(v), category: 'Data' },
     Archivable: { type: 'bool', default: () => true, category: 'Behavior' },
     Tags: { type: 'string', hidden: true },
+    // multiplayer: the player whose machine controls this (and everything inside it); set with SetNetworkOwner
+    NetworkOwner: { type: 'Instance', hidden: true, noSave: true, readonly: true },
   },
   methods: {
+    /**
+     * Multiplayer (host only): hand this object, and everything inside it, to a player. Their changes
+     * to it (properties, attributes, physics) then reach the host and everyone else. nil gives it back.
+     */
+    SetNetworkOwner: (self: Instance, player: unknown) => rt(self).setNetworkOwner(self, player instanceof Instance ? player : null),
+    /** the player controlling this (its own owner, an owner above it, or the character it is in); nil: the host */
+    GetNetworkOwner: (self: Instance) => rt(self).networkOwner(self),
+    SetNetworkOwnershipAuto: (self: Instance) => rt(self).setNetworkOwner(self, null),
     Destroy: (self: Instance) => { self.destroy() },
     Remove: (self: Instance) => { self.setParent(null) },
     Clone: (self: Instance) => (self.get('Archivable') ? self.clone() : null),

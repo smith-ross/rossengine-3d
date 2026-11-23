@@ -174,6 +174,13 @@ export class GameSession implements Runtime, Runtime2D {
     if (net?.role === 'client') {
       this.player = this.netMap.get(net.player)!
       game.getService('Players').rawSet('LocalPlayer', this.player) // before any LocalScript starts
+      // listening before the scripts start: what they change straight away (on things this player owns) goes to the host
+      this.netClient = new NetClient({
+        game, localPlayer: () => this.player ?? null,
+        invokeHere: (r, e, a, answer) => this.invokeHere(r, e, a, answer),
+        ownershipChanged: () => this.ownershipChanged(),
+        disconnected: (reason) => this.disconnected(reason),
+      }, net.link, this.netMap)
     }
     // 1. scripts (a client runs only LocalScripts; the host runs both)
     for (const d of game.getDescendants()) this.maybeRunScript(d)
@@ -186,15 +193,7 @@ export class GameSession implements Runtime, Runtime2D {
     for (const d of game.getDescendants()) this.maybeRunScript(d) // the LocalScripts, now there is a LocalPlayer
     // 4. multiplayer: start hosting, or listening to the host
     if (net?.role === 'host') this.netHost = new NetHost(this.hostHooks(net.placeName ?? 'Game'), net.link)
-    if (net?.role === 'client') {
-      this.netClient = new NetClient({
-        game, localPlayer: () => this.player ?? null,
-        invokeHere: (r, e, a, answer) => this.invokeHere(r, e, a, answer),
-        ownershipChanged: () => this.ownershipChanged(),
-        disconnected: (reason) => this.disconnected(reason),
-      }, net.link, this.netMap)
-      this.netClient.start()
-    }
+    if (net?.role === 'client') this.netClient!.start() // and now what the host sent meanwhile
     // 4. AnimationPlayers set to Autoplay
     this.animations.autoplay(game.getDescendants().filter((d) => d.className === 'AnimationPlayer'))
 
@@ -734,6 +733,19 @@ export class GameSession implements Runtime, Runtime2D {
 
   // ------------------------------------------------------------------ multiplayer
   netRole(): NetRole { return this.opts.network?.role ?? 'solo' }
+
+  /** Instance:SetNetworkOwner: hand an object (and what is inside it) to a player's machine, or back (null). */
+  setNetworkOwner(inst: Instance, player: Instance | null) {
+    if (this.netRole() === 'client') throw new Error('SetNetworkOwner can only be used on the host (from a Script)')
+    if (player && (player.className !== 'Player' || player.parent !== this.game.getService('Players'))) {
+      throw new Error('SetNetworkOwner: argument 1 must be a Player in the game (or nil to give it back to the host)')
+    }
+    if (inst instanceof DataModel || inst.parent === this.game) throw new Error(`SetNetworkOwner can't be used on ${inst.name}`)
+    // the host owning it is the same as nobody owning it
+    inst.set('NetworkOwner', player === this.player ? null : player)
+  }
+
+  networkOwner(inst: Instance): Instance | null { return ownerOf(inst, this.game) }
   hostAddress() { return this.netHost?.address ?? '' }
 
   /** Something another machine moves: another player's character, or (on a player's machine) the host's world. */
@@ -749,6 +761,9 @@ export class GameSession implements Runtime, Runtime2D {
     queueMicrotask(() => {
       if (this.stopped) return
       this.physics.refreshRemote()
+      // humanoids move on whichever machine controls them now
+      for (const [model, ctl] of this.controllers) if (this.isRemote(model)) { ctl.dispose(); this.controllers.delete(model) }
+      for (const d of this.game.workspace.getDescendants()) if (d instanceof Model) this.maybeControl(d)
       const ch = this.player?.get<Instance | null>('Character')
       if (ch && !ch.destroyed) {
         this.maybeControl(ch)
