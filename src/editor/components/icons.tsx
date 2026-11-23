@@ -4,7 +4,7 @@ import {
   Lightbulb, Link, List, LucideIcon, MapPin, Monitor, Mouse, MousePointerClick, Music, Package, PersonStanding,
   Pointer, Shield, Sparkles, Square, SquareDashed, SquareFunction, Sticker, TextCursorInput, Triangle, Type, User,
   UserRound, Users, Variable, Video, Volume2, Waves, Zap, Shapes, Layers, Move, Image as ImageIcon, Film, Clapperboard, Grid3x3,
-  Square as SquareIcon, Scan, Paintbrush, Aperture,
+  Square as SquareIcon, Scan, Paintbrush, Aperture, Footprints,
 } from 'lucide-react'
 
 const ICONS: Record<string, [LucideIcon, string]> = {
@@ -19,7 +19,7 @@ const ICONS: Record<string, [LucideIcon, string]> = {
   ImageButton: [Image, '#b48cff'], UICorner: [SquareDashed, '#b48cff'], UIStroke: [SquareDashed, '#b48cff'],
   UIListLayout: [List, '#b48cff'], PointLight: [Lightbulb, '#ffd54a'], SpotLight: [Flashlight, '#ffd54a'], Sound: [Music, '#5ad1c9'],
   ClickDetector: [Pointer, '#c0c4cc'], WeldConstraint: [Link, '#c0c4cc'], BindableEvent: [Zap, '#ff9a8a'],
-  Shader: [Paintbrush, '#ff7ac6'], ScreenShader: [Aperture, '#ff7ac6'], AnimationPlayer: [Clapperboard, '#ffb85a'], Animation: [Film, '#ffb85a'], Skeleton: [PersonStanding, '#c9a0ff'], Bone: [Link, '#c9a0ff'],
+  Shader: [Paintbrush, '#ff7ac6'], ScreenShader: [Aperture, '#ff7ac6'], AnimationPlayer: [Clapperboard, '#ffb85a'], Animation: [Film, '#ffb85a'], Skeleton: [PersonStanding, '#c9a0ff'], CharacterBody3D: [Footprints, '#5fa0ff'], Bone: [Link, '#c9a0ff'],
   BindableFunction: [SquareFunction, '#ff9a8a'], ForceField: [Shield, '#7fcfff'], Decal: [Sticker, '#e79a5a'],
   Tween: [Waves, '#c0c4cc'], InputObject: [Pointer, '#c0c4cc'],
   World2D: [Layers, '#5ad1c9'], Node2D: [Move, '#5ad1c9'], Sprite2D: [ImageIcon, '#5ad1c9'], AnimatedSprite2D: [Film, '#5ad1c9'],

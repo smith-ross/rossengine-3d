@@ -81,6 +81,26 @@ Supported API includes:
 
 Scripts in any language that loop without yielding are stopped after 8 seconds ("Script timeout").
 
+## Custom 3D characters
+
+`CharacterBody3D` is a character you move from a script, for any custom character in place of the default Humanoid one.
+- **Shape:** a capsule sized by `Size`, kinematic, so physics never pushes it around. It slides along walls, steps up ledges up to `MaxStepHeight`, walks up slopes up to `MaxSlopeAngle`, and sticks to the ground going down.
+- **Riders:** parts inside it, or welded to it, ride along rigidly. Put your character's MeshPart inside it, make the body transparent, and you're done.
+
+```lua
+body.Velocity = Vector3.new(x, body.Velocity.Y, z)  -- gravity (Workspace.Gravity) is added for you
+body:MoveAndSlide()                                 -- moves by Velocity this frame
+if body:IsOnFloor() then ... end                    -- also IsOnWall(), IsOnCeiling(), GetFloorNormal()
+```
+
+**A ready-made controller:** select a CharacterBody3D (or a model with one inside) and open **Script ▾**. Under **Character controller** you can insert a complete controller in Luau, TypeScript or Python. It's an ordinary script you can edit:
+- WASD/arrow keys move relative to the camera, Shift sprints, and Space jumps;
+- speeding up and slowing down are smoothed, and the body turns to face where it's going;
+- the default camera follows it (hold the right mouse button to orbit, scroll to zoom);
+- if the body has an AnimationPlayer with animations named `Walk`, `Idle` or `Jump`, it plays them.
+
+Inserting the controller also turns off `Players.CharacterAutoLoads`, since this body replaces the default character.
+
 ## Languages
 
 Every Script and ModuleScript has a **Language** property: Luau, TypeScript or Python. Use **Script ▾** or **Module ▾** in the toolbar to create one in a given language. Modules written in any language can `require` (Luau/TypeScript) or `import` (Python) modules written in the others.

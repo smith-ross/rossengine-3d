@@ -5,7 +5,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { editor, Tool, useEditor } from '../store'
-import { insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
+import { characterControllerTarget, insertCharacterController, insertObject, insertPart, insertScript, groupSelection, ungroupSelection, weldSelection } from '../ops'
 import { LANGUAGES, ScriptLanguage } from '../../engine/scripting/languages'
 import { ClassIcon } from './icons'
 import { openPlace, savePlace } from '../fileio'
@@ -132,7 +132,7 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
         <Btn icon={<Shapes size={18} />} label="Model" disabled={playing} title="Import a 3D model file (.glb, .gltf, .obj, .fbx, .stl) as a MeshPart"
           onClick={async () => { for (const a of await importFiles(await pickFiles('mesh'))) await insertAsset(a) }} />
         <Drop icon={<FileCode2 size={18} />} label="Script" disabled={playing}>
-          {(close) => <LanguageMenu onPick={(l) => { insertScript('Script', l); close() }} />}
+          {(close) => <LanguageMenu onPick={(l) => { insertScript('Script', l); close() }} onCharacter={(l) => { insertCharacterController(l); close() }} />}
         </Drop>
         <Drop icon={<Braces size={18} />} label="Module" disabled={playing}>
           {(close) => <LanguageMenu module onPick={(l) => { insertScript('ModuleScript', l); close() }} />}
@@ -163,7 +163,9 @@ export function Toolbar({ onBuild }: { onBuild: () => void }) {
   )
 }
 
-function LanguageMenu({ onPick, module }: { onPick: (l: ScriptLanguage) => void; module?: boolean }) {
+function LanguageMenu({ onPick, module, onCharacter }: { onPick: (l: ScriptLanguage) => void; module?: boolean; onCharacter?: (l: ScriptLanguage) => void }) {
+  // a CharacterBody3D (or something holding one) is selected: offer the ready-made controller too
+  const target = onCharacter ? characterControllerTarget() : null
   const hint: Record<ScriptLanguage, string> = {
     Luau: 'Roblox-style Luau',
     TypeScript: 'typed, async/await',
@@ -178,6 +180,18 @@ function LanguageMenu({ onPick, module }: { onPick: (l: ScriptLanguage) => void;
           <span className="menu-shortcut">{hint[l]}</span>
         </div>
       ))}
+      {target && (
+        <>
+          <div className="menu-sep" />
+          <div className="menu-cat">Character controller for “{target.name}”</div>
+          {LANGUAGES.map((l) => (
+            <div key={'c' + l} className="menu-item" title="Walk, sprint and jump with a following camera: a normal script you can edit" onClick={() => onCharacter!(l)}>
+              <span><ClassIcon cls="Script" lang={l} /> {l}</span>
+              <span className="menu-shortcut">move · jump · camera</span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }

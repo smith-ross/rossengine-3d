@@ -31,6 +31,9 @@ export interface Runtime {
   soundControl(sound: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume'): void
   animationControl(player: Instance, action: 'Play' | 'Stop' | 'Pause' | 'Resume' | 'Seek', arg?: unknown): void
   saveStore(): SaveStore
+  /** CharacterBody3D:MoveAndSlide() and its contact state */
+  moveAndSlide3D(body: Instance): Vector3
+  bodyState3D(body: Instance): { floor: boolean; wall: boolean; ceiling: boolean; floorNormal: Vector3 }
   /** a script set an attribute on SaveService: save it too */
   saveAttributeSet(key: string, value: unknown): void
   kick(player: Instance, message: string): void
@@ -413,6 +416,31 @@ defineClass(ScreenShader, {
 
 class WedgePart extends BasePart {}
 defineClass(WedgePart, { name: 'WedgePart', superclass: 'BasePart', category: 'Parts' })
+
+/**
+ * A character you move from a script: set Velocity, call MoveAndSlide(), check IsOnFloor(). It's a
+ * capsule (fitted to Size) that slides along walls, climbs steps and slopes, and is never pushed
+ * around by physics. Parts inside it or welded to it (e.g. a character mesh) move with it.
+ */
+export class CharacterBody3D extends BasePart {}
+defineClass(CharacterBody3D, {
+  name: 'CharacterBody3D', superclass: 'BasePart', category: 'Parts',
+  props: {
+    Velocity: { type: 'Vector3', default: () => new Vector3(0, 0, 0), category: 'Character' },
+    UseGravity: { type: 'bool', default: () => true, category: 'Character' },
+    /** steepest slope (degrees) it can walk up */
+    MaxSlopeAngle: { type: 'number', default: () => 50, category: 'Character' },
+    /** highest ledge (studs) it steps onto without jumping */
+    MaxStepHeight: { type: 'number', default: () => 1, category: 'Character' },
+  },
+  methods: {
+    MoveAndSlide: (self: Instance) => rt(self).moveAndSlide3D(self),
+    IsOnFloor: (self: Instance) => rt(self).bodyState3D(self).floor,
+    IsOnWall: (self: Instance) => rt(self).bodyState3D(self).wall,
+    IsOnCeiling: (self: Instance) => rt(self).bodyState3D(self).ceiling,
+    GetFloorNormal: (self: Instance) => rt(self).bodyState3D(self).floorNormal,
+  },
+})
 class SpawnLocation extends Part {}
 defineClass(SpawnLocation, {
   name: 'SpawnLocation', superclass: 'Part', category: 'Parts',

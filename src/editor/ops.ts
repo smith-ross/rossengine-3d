@@ -5,6 +5,7 @@ import { BasePart, Model, boundingBox, partsOf } from '../engine/classes'
 import { editor } from './store'
 import { view2d } from './components/Viewport2D'
 import { DEFAULT_SOURCE, ScriptLanguage } from '../engine/scripting/languages'
+import { CHARACTER_CONTROLLER } from '../engine/scripting/characterController'
 import { compileRecipe, defaultRecipe } from '../engine/shaderRecipe'
 
 /** Insert a Script or ModuleScript in the given language, with a starter source. */
@@ -22,6 +23,39 @@ export function insertScript(cls: 'Script' | 'ModuleScript', lang: ScriptLanguag
 
 /** Instances edited in the code editor: scripts and shaders. */
 export const isCode = (i: Instance) => i.isA('LuaSourceContainer') || i.className === 'Shader' || i.className === 'ScreenShader'
+
+/**
+ * Where a character controller script can go: the selection if it is a CharacterBody3D or has one
+ * inside it (e.g. a model holding the body and its mesh).
+ */
+export function characterControllerTarget(): Instance | null {
+  const sel = editor.selection[0]
+  if (!sel || editor.playing) return null
+  if (sel.className === 'CharacterBody3D') return sel
+  return sel.getDescendants().some((d) => d.className === 'CharacterBody3D') ? sel : null
+}
+
+/** Insert the default CharacterBody3D controller (an ordinary, editable script) in a language. */
+export function insertCharacterController(lang: ScriptLanguage): Instance | null {
+  const target = characterControllerTarget()
+  if (!target) return null
+  return editor.mutate(() => {
+    const s = createInstance('Script')
+    s.name = 'CharacterController'
+    s.set('Language', enumItem('ScriptLanguage', lang))
+    s.set('Source', CHARACTER_CONTROLLER[lang])
+    s.setParent(target)
+    // the body replaces the default character (set here too, so it never spawns even for a moment)
+    const players = editor.game.getService('Players')
+    if (players.get('CharacterAutoLoads')) {
+      players.set('CharacterAutoLoads', false)
+      editor.log('info', 'Players.CharacterAutoLoads is now off: your CharacterBody3D is the player character.')
+    }
+    editor.selection = [s]
+    editor.openScript(s)
+    return s
+  })
+}
 
 let clipboard: SerializedInstance[] = []
 /** Where new parts go: set by the viewport to the point in front of the camera. */
@@ -72,6 +106,12 @@ export function insertObject(className: string, parent?: Instance): Instance {
       const p = insertHint.position
       inst.set('CFrame', CFrame.fromPosition(new Vector3(Math.round(p.x), Math.round(p.y) + 0.5, Math.round(p.z))))
       if (className === 'SpawnLocation') { inst.set('Size', new Vector3(12, 1, 12)) }
+      if (className === 'CharacterBody3D') {
+        // a person-sized capsule standing on the ground
+        inst.set('Size', new Vector3(2, 5, 2))
+        inst.set('Color', Color3.fromRGB(95, 160, 255))
+        inst.set('CFrame', CFrame.fromPosition(new Vector3(Math.round(p.x), Math.round(p.y) + 2.5, Math.round(p.z))))
+      }
     }
     if (className === 'Part' || className === 'WedgePart') inst.set('Color', Color3.fromRGB(163, 162, 165))
     if (isA(className, 'Node2D') && !(parent ?? defaultParentFor(className)).isA('Node2D')) {

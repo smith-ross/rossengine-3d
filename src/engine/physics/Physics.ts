@@ -23,6 +23,18 @@ interface Body {
 
 const STEP = 1 / 60
 
+export interface CharacterContact { floor: boolean; wall: boolean; ceiling: boolean; floorNormal: Vector3 }
+const NO_CONTACT = (): CharacterContact => ({ floor: false, wall: false, ceiling: false, floorNormal: new Vector3(0, 1, 0) })
+
+/** A CharacterBody3D: its controller, and the parts that ride along with it. */
+interface CharBody {
+  controller: RAPIER.KinematicCharacterController
+  /** parts inside the body or welded to it -> their offset from the body */
+  followers: Map<BasePart, CFrame>
+  state: CharacterContact
+}
+const isCharacterBody = (p: Instance) => p.className === 'CharacterBody3D'
+
 export class Physics {
   readonly world: RAPIER.World
   private events = new RAPIER.EventQueue(true)
@@ -37,6 +49,9 @@ export class Physics {
   private dirtyWelds = new Set<Instance>()
   /** pairs currently touching, to avoid duplicate Touched events */
   private touching = new Map<string, number>()
+  private chars = new Map<BasePart, CharBody>()
+  /** the set of parts riding on character bodies may have changed */
+  private followersDirty = false
 
   constructor(readonly game: DataModel) {
     const g = game.workspace.get<number>('Gravity')
@@ -61,13 +76,13 @@ export class Physics {
   private inWorkspace(i: Instance) { return i.isDescendantOf(this.game.workspace) }
 
   private track(inst: Instance) {
-    if (inst instanceof BasePart && this.inWorkspace(inst)) this.dirty.add(inst)
-    else if (inst.className === 'WeldConstraint' && this.inWorkspace(inst)) this.dirtyWelds.add(inst)
+    if (inst instanceof BasePart && this.inWorkspace(inst)) { this.dirty.add(inst); this.followersDirty = true }
+    else if (inst.className === 'WeldConstraint' && this.inWorkspace(inst)) { this.dirtyWelds.add(inst); this.followersDirty = true }
   }
 
   private untrack(inst: Instance) {
-    if (inst instanceof BasePart) { this.dirty.delete(inst); this.removeBody(inst) }
-    if (inst.className === 'WeldConstraint') { this.dirtyWelds.delete(inst); this.removeJoint(inst) }
+    if (inst instanceof BasePart) { this.dirty.delete(inst); this.removeBody(inst); this.followersDirty = true }
+    if (inst.className === 'WeldConstraint') { this.dirtyWelds.delete(inst); this.removeJoint(inst); this.followersDirty = true }
   }
 
   private changed(inst: Instance, prop: string) {
@@ -78,6 +93,14 @@ export class Physics {
       switch (prop) {
         case 'CFrame': {
           if (b.role) return // driven by the character controller
+          if (this.chars.has(inst)) {
+            // a script turned or teleported a CharacterBody3D: its riders come along
+            const cf = inst.cframe
+            b.rb.setTranslation({ x: cf.x, y: cf.y, z: cf.z }, true)
+            b.rb.setRotation(cf.toQuaternion(), true)
+            this.moveFollowers(inst)
+            return
+          }
           const cf = inst.cframe
           const q = cf.toQuaternion()
           if (b.rb.isKinematic()) {
@@ -100,11 +123,13 @@ export class Physics {
           break
         }
         case 'Anchored': case 'CanCollide': case 'Size': case 'Shape': case 'CanTouch': case 'Massless': case 'MeshId': case 'CollisionFidelity':
+        case 'MaxSlopeAngle': case 'MaxStepHeight':
           this.dirty.add(inst)
           break
       }
     } else if (inst.className === 'WeldConstraint' && (prop === 'Part0' || prop === 'Part1' || prop === 'Enabled')) {
       this.dirtyWelds.add(inst)
+      this.followersDirty = true
     } else if (inst.className === 'Workspace' && prop === 'Gravity') {
       this.world.gravity = { x: 0, y: -inst.get<number>('Gravity'), z: 0 }
     }
@@ -121,7 +146,7 @@ export class Physics {
   bodyOf(part: BasePart) { return this.bodies.get(part) }
   partOfCollider(c: RAPIER.Collider) { return this.byCollider.get(c.handle)?.part }
 
-  private removeBody(part: BasePart) {
+  private removeBody(part: BasePart, rebuilding = false) {
     const b = this.bodies.get(part)
     if (!b) return
     // joints attached to this body are removed with it
@@ -131,26 +156,35 @@ export class Physics {
     this.byCollider.delete(b.collider.handle)
     this.world.removeRigidBody(b.rb)
     this.bodies.delete(part)
+    const c = this.chars.get(part)
+    if (c && !rebuilding) {
+      // the body itself is gone (not just being rebuilt): its riders go back to normal physics
+      try { this.world.removeCharacterController(c.controller) } catch { /* world freed */ }
+      for (const f of c.followers.keys()) if (this.roles.get(f) === 'limb') { this.roles.delete(f); if (!f.destroyed) this.dirty.add(f) }
+      this.chars.delete(part)
+    }
   }
 
   private createBody(part: BasePart) {
-    this.removeBody(part)
+    this.removeBody(part, true)
     const role = this.roles.get(part)
     const cf = part.cframe
     const q = cf.toQuaternion()
     const anchored = part.get<boolean>('Anchored')
     let desc: RAPIER.RigidBodyDesc
-    if (role) desc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    const character = isCharacterBody(part)
+    if (role || character) desc = RAPIER.RigidBodyDesc.kinematicPositionBased()
     else if (anchored) desc = RAPIER.RigidBodyDesc.fixed()
     else desc = RAPIER.RigidBodyDesc.dynamic().setCanSleep(true)
     desc.setTranslation(cf.x, cf.y, cf.z).setRotation(q)
-    if (!anchored && !role) {
+    if (!anchored && !role && !character) {
       const v = part.get<Vector3>('AssemblyLinearVelocity')
       const w = part.get<Vector3>('AssemblyAngularVelocity')
       desc.setLinvel(v.x, v.y, v.z).setAngvel({ x: w.x, y: w.y, z: w.z })
     }
     const rb = this.world.createRigidBody(desc)
-    const cdesc = role === 'root' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0) : this.shapeFor(part)
+    const cdesc = role === 'root' ? RAPIER.ColliderDesc.capsule(1.5, 1).setTranslation(0, -0.5, 0)
+      : character ? characterCapsule(part) : this.shapeFor(part)
     const canCollide = part.get<boolean>('CanCollide')
     if (role === 'limb' || (!canCollide && role !== 'root')) cdesc.setSensor(true)
     cdesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
@@ -161,7 +195,117 @@ export class Physics {
     const body: Body = { part, rb, collider, role }
     this.bodies.set(part, body)
     this.byCollider.set(collider.handle, body)
+    if (character) this.setupCharacter(part)
   }
+
+  // ------------------------------------------------------------------ CharacterBody3D
+  private setupCharacter(part: BasePart) {
+    let c = this.chars.get(part)
+    if (!c) {
+      c = { controller: this.world.createCharacterController(0.05), followers: new Map(), state: NO_CONTACT() }
+      this.chars.set(part, c)
+    }
+    const k = c.controller
+    const slope = Math.min(89, Math.max(0, part.get<number>('MaxSlopeAngle') ?? 50))
+    k.setUp({ x: 0, y: 1, z: 0 })
+    k.setSlideEnabled(true)
+    k.setMaxSlopeClimbAngle((slope * Math.PI) / 180)
+    k.setMinSlopeSlideAngle(((slope + 5) * Math.PI) / 180)
+    const step = part.get<number>('MaxStepHeight') ?? 1
+    if (step > 0) k.enableAutostep(step, 0.3, false)
+    else k.disableAutostep()
+    k.enableSnapToGround(0.5)
+    k.setApplyImpulsesToDynamicBodies(true)
+    k.setCharacterMass(20)
+    this.followersDirty = true
+  }
+
+  /** Parts inside a CharacterBody3D, or welded to it, ride along rigidly (no physics of their own). */
+  private refreshFollowers() {
+    this.followersDirty = false
+    if (!this.chars.size) return
+    const welds = this.game.workspace.getDescendants().filter((d) => d.className === 'WeldConstraint' && d.get('Enabled'))
+    for (const [body, c] of this.chars) {
+      const want = new Set<BasePart>()
+      for (const d of body.getDescendants()) if (d instanceof BasePart && !isCharacterBody(d)) want.add(d)
+      for (const w of welds) {
+        const p0 = w.get<Instance | null>('Part0'), p1 = w.get<Instance | null>('Part1')
+        if (p0 === body && p1 instanceof BasePart && !isCharacterBody(p1)) want.add(p1)
+        if (p1 === body && p0 instanceof BasePart && !isCharacterBody(p0)) want.add(p0)
+      }
+      for (const f of [...c.followers.keys()]) {
+        if (want.has(f)) continue
+        c.followers.delete(f)
+        if (this.roles.get(f) === 'limb') { this.roles.delete(f); if (!f.destroyed) this.dirty.add(f) }
+      }
+      const inv = body.cframe.inverse()
+      for (const f of want) {
+        if (c.followers.has(f)) continue
+        c.followers.set(f, inv.mul(f.cframe))
+        if (this.roles.get(f) !== 'limb') { this.roles.set(f, 'limb'); this.dirty.add(f) }
+      }
+    }
+  }
+
+  private moveFollowers(body: BasePart) {
+    const c = this.chars.get(body)
+    if (!c) return
+    const cf = body.cframe
+    for (const [f, offset] of c.followers) {
+      if (f.destroyed) continue
+      const fcf = cf.mul(offset)
+      f.set('CFrame', fcf)
+      const fb = this.bodies.get(f)
+      if (fb) { fb.rb.setNextKinematicTranslation({ x: fcf.x, y: fcf.y, z: fcf.z }); fb.rb.setNextKinematicRotation(fcf.toQuaternion()) }
+    }
+  }
+
+  /** CharacterBody3D:MoveAndSlide(): move by Velocity * dt, sliding along what it hits. */
+  moveAndSlide(part: BasePart, dt: number): Vector3 {
+    this.flushDirty()
+    let v = part.get<Vector3>('Velocity')
+    const b = this.bodies.get(part), c = this.chars.get(part)
+    if (!b || !c || !(dt > 0)) return v
+    if (part.get<boolean>('UseGravity')) v = new Vector3(v.x, Math.max(-500, v.y - this.game.workspace.get<number>('Gravity') * dt), v.z)
+    const cf = part.cframe
+    // query from where the body is now (its collider only moves on its own during world.step)
+    b.rb.setTranslation({ x: cf.x, y: cf.y, z: cf.z }, true)
+    b.rb.setRotation(cf.toQuaternion(), true)
+    this.world.propagateModifiedBodyPositionsToColliders()
+    const desired = { x: v.x * dt, y: v.y * dt, z: v.z * dt }
+    c.controller.computeColliderMovement(b.collider, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, (col) => {
+      const o = this.byCollider.get(col.handle)
+      return !o || (o.part !== part && !c.followers.has(o.part))
+    })
+    const m = c.controller.computedMovement()
+    const st: CharacterContact = { floor: c.controller.computedGrounded(), wall: false, ceiling: false, floorNormal: new Vector3(0, 1, 0) }
+    for (let i = 0; i < c.controller.numComputedCollisions(); i++) {
+      const hit = c.controller.computedCollision(i)
+      if (!hit) continue
+      const n = hit.normal1
+      if (n.y > 0.6) { st.floor = true; st.floorNormal = new Vector3(n.x, n.y, n.z) }
+      else if (n.y < -0.6) st.ceiling = true
+      else st.wall = true
+    }
+    if (st.floor && v.y < 0) v = new Vector3(v.x, 0, v.z)
+    if (st.ceiling && v.y > 0) v = new Vector3(v.x, 0, v.z)
+    // against a wall: keep only the sideways part of the speed it actually managed
+    if (st.wall) v = new Vector3(m.x / dt, v.y, m.z / dt)
+    c.state = st
+    const pos = new Vector3(cf.x + m.x, cf.y + m.y, cf.z + m.z)
+    this.writing = true
+    try {
+      part.set('CFrame', cf.withPosition(pos))
+      part.set('Velocity', v)
+    } finally { this.writing = false }
+    b.rb.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true)
+    b.rb.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z })
+    this.moveFollowers(part)
+    if (pos.y < this.game.workspace.get<number>('FallenPartsDestroyHeight')) part.destroy()
+    return v
+  }
+
+  characterState(part: BasePart): CharacterContact { return this.chars.get(part)?.state ?? NO_CONTACT() }
 
   /** Collider shape; MeshParts with Hull fidelity get rebuilt once their mesh has loaded. */
   private shapeFor(part: BasePart) {
@@ -211,6 +355,15 @@ export class Physics {
       const list = [...this.dirtyWelds]
       this.dirtyWelds.clear()
       for (const w of list) this.createJoint(w)
+    }
+    // character bodies' riders (may rebuild some bodies as kinematic, so flush once more)
+    if (this.followersDirty) {
+      this.refreshFollowers()
+      if (this.dirty.size || this.dirtyWelds.size) {
+        this.followersDirty = false
+        this.flushDirty()
+        this.followersDirty = false
+      }
     }
   }
 
@@ -363,4 +516,12 @@ function shapeFor(part: BasePart): RAPIER.ColliderDesc {
     return RAPIER.ColliderDesc.cylinder(hx, r).setRotation({ x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 })
   }
   return RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+}
+
+/** The capsule of a CharacterBody3D: as wide as the smaller of Size X/Z, as tall as Size Y. */
+function characterCapsule(part: BasePart) {
+  const s = part.size
+  const radius = Math.max(0.1, Math.min(s.x, s.z) / 2)
+  const half = Math.max(0.01, s.y / 2 - radius)
+  return RAPIER.ColliderDesc.capsule(half, radius)
 }

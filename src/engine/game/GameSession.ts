@@ -44,6 +44,8 @@ export class GameSession implements Runtime, Runtime2D {
   private animator = new Animator2D()
   private animations = new AnimationRunner((inst, event, ...args) => inst.fire(event, ...args))
   private save!: SaveStore
+  /** this frame's dt (CharacterBody3D:MoveAndSlide moves by Velocity * frameDt) */
+  private frameDt = 1 / 60
   private syncingSave = false
   scripts!: ScriptHost
   gui!: GuiRenderer
@@ -286,6 +288,7 @@ export class GameSession implements Runtime, Runtime2D {
 
   private frame(dt: number) {
     if (this.stopped) return
+    this.frameDt = dt
     this.gameTime += dt
     const rs = this.game.getService('RunService')
     this.scripts.fireFrame(rs, 'Stepped', [this.gameTime, dt])
@@ -415,7 +418,9 @@ export class GameSession implements Runtime, Runtime2D {
       if (head instanceof BasePart) focus = head.cframe.position.add(new Vector3(0, head.name === 'Head' ? 0.5 : 1.5, 0))
       ignore = subject.parent
     } else if (subject instanceof BasePart) {
-      focus = subject.cframe.position
+      // a CharacterBody3D: look at its upper body; the ray that keeps the camera out of walls skips it
+      focus = subject.className === 'CharacterBody3D' ? subject.cframe.position.add(new Vector3(0, subject.size.y * 0.35, 0)) : subject.cframe.position
+      ignore = subject
     }
     if (!focus) return
     const sp = this.game.getService('StarterPlayer')
@@ -667,6 +672,9 @@ export class GameSession implements Runtime, Runtime2D {
   }
 
   saveStore() { return this.save }
+
+  moveAndSlide3D(body: Instance) { return this.physics.moveAndSlide(body as BasePart, this.frameDt) }
+  bodyState3D(body: Instance) { return this.physics.characterState(body as BasePart) }
   saveAttributeSet(key: string, value: unknown) {
     if (this.syncingSave) return
     this.syncingSave = true

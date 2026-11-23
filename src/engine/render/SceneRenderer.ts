@@ -30,6 +30,22 @@ const UNIT_WEDGE = (() => {
   return g
 })()
 
+/** A CharacterBody3D's capsule (matching its collider), in unit space so the part's Size scaling restores it. */
+const capsules = new Map<string, THREE.BufferGeometry>()
+function capsuleFor(size: Vector3): THREE.BufferGeometry {
+  const key = `${size.x},${size.y},${size.z}`
+  let g = capsules.get(key)
+  if (!g) {
+    const r = Math.max(0.1, Math.min(size.x, size.z) / 2)
+    const length = Math.max(0, size.y - 2 * r)
+    g = new THREE.CapsuleGeometry(r, length, 8, 20)
+    g.scale(1 / (size.x || 1), 1 / (size.y || 1), 1 / (size.z || 1))
+    if (capsules.size > 64) capsules.clear()
+    capsules.set(key, g)
+  }
+  return g
+}
+
 interface PartView {
   /** root object; its matrix is CFrame * scale(Size) */
   obj: THREE.Object3D
@@ -524,6 +540,7 @@ export class SceneRenderer {
 
   private shapeOf(part: BasePart) {
     if (part.className === 'WedgePart') return 'Wedge'
+    if (part.className === 'CharacterBody3D') return 'Capsule'
     if (part.className === 'MeshPart') return 'Mesh'
     return part.get<EnumItem | undefined>('Shape')?.name ?? 'Block'
   }
@@ -551,7 +568,7 @@ export class SceneRenderer {
       })
       return
     }
-    v.mesh.geometry = shape === 'Ball' ? UNIT_SPHERE : shape === 'Cylinder' ? UNIT_CYLINDER : shape === 'Wedge' ? UNIT_WEDGE : UNIT_BOX
+    v.mesh.geometry = shape === 'Capsule' ? capsuleFor(part.size) : shape === 'Ball' ? UNIT_SPHERE : shape === 'Cylinder' ? UNIT_CYLINDER : shape === 'Wedge' ? UNIT_WEDGE : UNIT_BOX
     this.updateMaterial(part, v)
   }
 
